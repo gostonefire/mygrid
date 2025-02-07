@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+reqwest = { version = "0.12", features = ["blocking"] }
+md-5 = "0.10.6"
+chrono = "0.4"
+serde_json = "1.0"
+serde = { version = "1.0.215", features = ["derive"] }
