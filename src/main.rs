@@ -27,18 +27,26 @@ fn main() {
     let fox = manager_fox_cloud::Fox::new(api_key);
 
     //let y = fox.get_device_detail(SN);
-    //let y = fox.get_min_soc_on_grid(SN);
-    //let y = fox.get_device_time(SN);
-    let y = fox.get_battery_charging_time_schedule(&inverter_sn);
+    //let y = fox.get_min_soc_on_grid(&inverter_sn);
+    //let y = fox.get_device_time(&inverter_sn);
+    //let y = fox.get_battery_charging_time_schedule(&inverter_sn);
+    //let y = fox.get_current_soc(&inverter_sn);
+    let y = fox.get_max_soc(&inverter_sn);
+    //let y = fox.set_max_soc(&inverter_sn, 95);
+    //let y = fox.set_device_time(&inverter_sn, Local::now());
+    //let y = fox.set_min_soc_on_grid(&inverter_sn, 45);
+    //let y = fox.set_battery_charging_time_schedule(
+    //    &inverter_sn,
+    //    false, 1, 30, 3, 59,
+    //    false, 13, 0, 15, 59,
+    //);
 
     match y {
-        Ok(r) => { println!("{} {} {} {} {}",
-            r.enable_1,
-            r.start_time_1.hour,
-            r.start_time_1.minute,
-            r.end_time_1.hour,
-            r.end_time_1.minute
-        ); },
+        Ok(r) => { println!("{}", r); },
+        //Ok(r) => {
+        //    println!("{}-{:0>2}-{:0>2} {:0>2}:{:0>2}:{:0>2}", r.year, r.month, r.day, r.hour, r.minute, r.second);
+        //},
+        //Ok(()) => { println!("Fox was successfully set!");}
         Err(e) => { println!("Error: {}", e); }
     }
     println!("{}", x);

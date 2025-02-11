@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct ChargingTimeResult {
     pub result: ChargingTimeSchedule,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ChargingTimeSchedule {
+    #[serde(skip_deserializing)]
+    pub sn: String,
     #[serde(rename = "enable1")]
     pub enable_1: bool,
     #[serde(rename = "startTime1")]

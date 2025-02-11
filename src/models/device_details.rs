@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct DeviceDetailsResult {
     pub result: DeviceDetails,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct DeviceDetails {
     #[serde(rename = "deviceType")]
     pub device_type: String,
@@ -37,7 +37,7 @@ pub struct DeviceDetails {
     pub status: u8,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct DeviceDetailsFunction {
     pub scheduler: bool,
 }

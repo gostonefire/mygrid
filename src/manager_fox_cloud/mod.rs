@@ -1,13 +1,14 @@
-use chrono::Utc;
+use std::str::FromStr;
+use chrono::{DateTime, Datelike, Local, NaiveTime, TimeDelta, Timelike, Utc};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use crate::models::charging_time_schedule::{ChargingTimeResult, ChargingTimeSchedule};
-use crate::models::soc_settings::{SocSettingsResult};
+use crate::models::charging_time_schedule::{ChargingTime, ChargingTimeResult, ChargingTimeSchedule};
+use crate::models::soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
 use crate::models::device_details::{DeviceDetailsResult, DeviceDetails};
-use crate::models::device_time::{DeviceTime, DeviceTimeResult};
+use crate::models::device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
 
@@ -41,20 +42,102 @@ impl Fox {
         Ok(fox_data.result)
     }
 
+    /// Obtain the battery current soc (state of charge)
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20real-time20data0a3ca20id3dget20device20real-time20data4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    pub fn get_current_soc(&self, sn: &str) -> Result<u8, String> {
+        let path = "/op/v0/device/real/query";
+
+        let req = RequestCurrentSoc { sn: sn.to_string(), variables: vec!["SoC".to_string()] };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let json = self.post_request(&path, req_json)?;
+
+        let fox_data: SocCurrentResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+        Ok(fox_data.result[0].datas[0].value.round() as u8)
+    }
+
     /// Obtain the inverter battery min soc on grid setting
     ///
-    /// See http://foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20minimum20soc20settings20for20the20battery20of20device200a3ca20id3dget20the20minimum20soc20settings20for20the20battery20of20device204303e203ca3e
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
     ///
     /// # Arguments
     ///
     /// * 'sn' - the serial number of the inverter
     pub fn get_min_soc_on_grid(&self, sn: &str) -> Result<u8, String> {
-        let path = "/op/v0/device/battery/soc/get";
-        let json = self.get_request(&path,vec![("sn", sn)])?;
+        let path = "/op/v0/device/setting/get";
 
-        let fox_data: SocSettingsResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let req = RequestSoc { sn: sn.to_string(), key: "MinSocOnGrid".to_string() };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
-        Ok(fox_data.result.min_soc_on_grid)
+        let json = self.post_request(&path, req_json)?;
+
+        let fox_data: SocSettingResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+        Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
+    }
+
+    /// Set the inverter battery min soc on grid setting
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20settings20item0a3ca20id3dset20the20device20settings20item4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    /// * 'soc' - the new min soc on grid value (10 - 100)
+    pub fn set_min_soc_on_grid(&self, sn: &str, soc: u8) -> Result<(), String> {
+        let path = "/op/v0/device/setting/set";
+
+        let req = SetSoc { sn: sn.to_string(), key: "MinSocOnGrid".to_string(), value: soc.to_string() };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let _ = self.post_request(&path, req_json)?;
+
+        Ok(())
+    }
+
+    /// Obtain the inverter battery max soc
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    pub fn get_max_soc(&self, sn: &str) -> Result<u8, String> {
+        let path = "/op/v0/device/setting/get";
+
+        let req = RequestSoc { sn: sn.to_string(), key: "MaxSoc".to_string() };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let json = self.post_request(&path, req_json)?;
+
+        let fox_data: SocSettingResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+        Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
+    }
+
+    /// Set the inverter battery max soc setting
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20settings20item0a3ca20id3dset20the20device20settings20item4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    /// * 'soc' - the new min soc on grid value (10 - 100)
+    pub fn set_max_soc(&self, sn: &str, soc: u8) -> Result<(), String> {
+        let path = "/op/v0/device/setting/set";
+
+        let req = SetSoc { sn: sn.to_string(), key: "MaxSoc".to_string(), value: soc.to_string() };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let _ = self.post_request(&path, req_json)?;
+
+        Ok(())
     }
 
     /// Obtain the battery charging time schedule.
@@ -74,6 +157,45 @@ impl Fox {
         Ok(fox_data.result)
     }
 
+    /// Set the battery charging time schedule.
+    /// This is the standard charging scheduler setting.
+    /// No time overlaps are permitted between the two schedules.
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20battery20charging20time0a3ca20id3dset20the20battery20charging20time4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    /// * 'enable_1' - whether schedule 1 shall be enabled
+    /// * 'start_hour_1' - start hour of schedule 1
+    /// * 'start_minute_1' - start minute of schedule 1
+    /// * 'end_hour_1' - end hour of schedule 1
+    /// * 'end_minute_1' - end minute of schedule 1
+    /// * 'enable_2' - whether schedule 2 shall be enabled
+    /// * 'start_hour_2' - start hour of schedule 2
+    /// * 'start_minute_2' - start minute of schedule 2
+    /// * 'end_hour_2' - end hour of schedule 2
+    /// * 'end_minute_2' - end minute of schedule 2
+    pub fn set_battery_charging_time_schedule(
+        &self,
+        sn: &str,
+        enable_1: bool, start_hour_1: u8, start_minute_1: u8, end_hour_1: u8, end_minute_1: u8,
+        enable_2: bool, start_hour_2: u8, start_minute_2: u8, end_hour_2: u8, end_minute_2: u8,
+    ) -> Result<(), String> {
+        let path = "/op/v0/device/battery/forceChargeTime/set";
+
+        let schedule = Self::build_charge_time_schedule(
+            sn,
+            enable_1, start_hour_1, start_minute_1, end_hour_1, end_minute_1,
+            enable_2, start_hour_2, start_minute_2, end_hour_2, end_minute_2,
+        )?;
+        let req_json = serde_json::to_string(&schedule).map_err(|e| e.to_string())?;
+
+        let _ = self.post_request(&path, req_json)?;
+
+        Ok(())
+    }
+
     /// Obtain the inverter local time
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
@@ -83,11 +205,44 @@ impl Fox {
     /// * 'sn' - the serial number of the inverter
     pub fn get_device_time(&self, sn: &str) -> Result<DeviceTime, String> {
         let path = "/op/v0/device/time/get";
-        let json = self.post_request(&path, format!("{{ \"sn\": \"{}\" }}", sn))?;
+
+        let req = RequestTime { sn: sn.to_string() };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let json = self.post_request(&path, req_json)?;
 
         let fox_data: DeviceTimeResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
         Ok(fox_data.result)
+    }
+
+    /// Set the inverter local time
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20time0a3ca20id3dset20the20device20time4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    /// * 'date_time - date and time as a DateTime<Local>, i.e. OS local time
+    pub fn set_device_time(&self, sn: &str, date_time: DateTime<Local>) -> Result<(), String> {
+        let path = "/op/v0/device/time/set";
+
+        let req = DeviceTime {
+            sn: sn.to_string(),
+            year: date_time.year().to_string(),
+            month: date_time.month().to_string(),
+            day: date_time.day().to_string(),
+            hour:date_time.hour().to_string(),
+            minute: date_time.minute().to_string(),
+            second: date_time.second().to_string(),
+        };
+        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let json = self.post_request(&path, req_json)?;
+
+        println!("{}", json);
+
+        Ok(())
     }
 
     /// Builds a request and sends it as a GET.
@@ -181,6 +336,92 @@ impl Fox {
         }
 
         Ok(json)
+    }
+
+    /// Builds a charge time schedule after first checking for inconsistencies.
+    /// Inconsistencies are any of:
+    /// * wrong time, e.g. hour outside 0-23 or minute outside 0-59
+    /// * start time after end time
+    /// * overlapping between schedule 1 and 2 (times are inclusive in both ends)
+    ///
+    /// It does correct minor errors:
+    /// * a schedule not enabled is automatically set to zero start and end time
+    /// * a schedule that are enabled but with same start and end time is disabled and zeroed
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    /// * 'enable_1' - whether schedule 1 shall be enabled
+    /// * 'start_hour_1' - start hour of schedule 1
+    /// * 'start_minute_1' - start minute of schedule 1
+    /// * 'end_hour_1' - end hour of schedule 1
+    /// * 'end_minute_1' - end minute of schedule 1
+    /// * 'enable_2' - whether schedule 2 shall be enabled
+    /// * 'start_hour_2' - start hour of schedule 2
+    /// * 'start_minute_2' - start minute of schedule 2
+    /// * 'end_hour_2' - end hour of schedule 2
+    /// * 'end_minute_2' - end minute of schedule 2
+    fn build_charge_time_schedule(
+        sn: &str,
+        mut enable_1: bool, mut start_hour_1: u8, mut start_minute_1: u8, mut end_hour_1: u8, mut end_minute_1: u8,
+        mut enable_2: bool, mut start_hour_2: u8, mut start_minute_2: u8, mut end_hour_2: u8, mut end_minute_2: u8,
+    ) -> Result<ChargingTimeSchedule, String> {
+
+        // Check schedule 1 for inconsistencies
+        let start_1 = NaiveTime::from_hms_opt(start_hour_1 as u32, start_minute_1 as u32, 0).ok_or("Schedule 1, start time error".to_string())?;
+        let end_1 = NaiveTime::from_hms_opt(end_hour_1 as u32, end_minute_1 as u32, 0).ok_or("Schedule 1, end time error".to_string())?;
+        let dur_1 = end_1 - start_1;
+
+        if dur_1 < TimeDelta::new(0, 0).unwrap() {
+            return Err("Schedule 1, start time after end time".to_string());
+        }
+
+        if !enable_1 || dur_1 == TimeDelta::new(0, 0).unwrap() {
+            enable_1 = false;
+            start_hour_1 = 0;
+            start_minute_1 = 0;
+            end_hour_1 = 0;
+            end_minute_1 = 0;
+        }
+
+        // Check schedule 2 for inconsistencies
+        let start_2 = NaiveTime::from_hms_opt(start_hour_2 as u32, start_minute_2 as u32, 0).ok_or("Schedule 2, start time error".to_string())?;
+        let end_2 = NaiveTime::from_hms_opt(end_hour_2 as u32, end_minute_2 as u32, 0).ok_or("Schedule 2, end time error".to_string())?;
+        let dur_2 = end_2 - start_2;
+
+        if dur_2 < TimeDelta::new(0, 0).unwrap() {
+            return Err("Schedule 2, start time after end time".to_string());
+        }
+
+        if !enable_2 || dur_2 <= TimeDelta::new(0, 0).unwrap() {
+            enable_2 = false;
+            start_hour_2 = 0;
+            start_minute_2 = 0;
+            end_hour_2 = 0;
+            end_minute_2 = 0;
+        }
+
+
+        // Check if schedules are overlapping
+        if enable_1 && enable_2 {
+            if start_2 >= start_1 && start_2 <= start_1 + dur_1 {
+                return Err("Overlapping schedules".to_string());
+            }
+            if end_2 >= start_1 && end_2 <= start_1 + dur_1 {
+                return Err("Overlapping schedules".to_string());
+            }
+        }
+
+        // All checks seem fine, return schedule struct
+        Ok(ChargingTimeSchedule {
+            sn: sn.to_string(),
+            enable_1,
+            start_time_1: ChargingTime { hour: start_hour_1, minute: start_minute_1 },
+            end_time_1: ChargingTime { hour: end_hour_1, minute: end_minute_1 },
+            enable_2,
+            start_time_2: ChargingTime { hour: start_hour_2, minute: start_minute_2 },
+            end_time_2: ChargingTime { hour: end_hour_2, minute: end_minute_2 },
+        })
     }
 }
 
