@@ -1,12 +1,18 @@
-use chrono::{Local};
-use crate::manager_nordpol::tariffs;
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc};
 use std::env;
+use std::ops::Add;
+use reqwest::header::DATE;
+use crate::charge_level::{get_charge_level};
 
-mod manager_nordpol;
+mod manager_nordpool;
 mod manager_fox_cloud;
 mod manager_sun;
 mod models;
+mod manager_smhi;
+mod charge_level;
 
+const LAT: f64 = 56.22332313734338;
+const LONG: f64 = 15.658393416666142;
 
 fn main() {
     let api_key: String;
@@ -20,10 +26,24 @@ fn main() {
         Err(e) => {println!("Error getting inverter SN: {}", e); return;}
     }
 
-    // https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices?date=2024-11-14&market=DayAhead&deliveryArea=SE4&currency=SEK
-    let _ = tariffs();
-    let x = manager_sun::get_max_elevation(Local::now(), 56.2f64);
+    let charge_level = get_charge_level(Local::now().add(TimeDelta::days(1)), vec![8, 9, 10]).unwrap();
+    println!("{}", charge_level);
 
+
+    /*
+    56.22332313734338, 15.658393416666142
+    let nordpool = manager_nordpool::NordPool::new();
+    let y = nordpool.get_tariffs(Utc::now().add(TimeDelta::days(1)));
+    match y {
+        Ok(r) => {
+            for d in r.multi_area_entries {
+                println!("{:?}: {:0.2}kr", d.delivery_start.naive_local().time(), (d.entry_per_area.se4 / 10f64).round() / 100f64);
+            }
+        },
+        Err(e) => { println!("Error: {}", e); }
+    }
+*/
+/*
     let fox = manager_fox_cloud::Fox::new(api_key);
 
     //let y = fox.get_device_detail(SN);
@@ -32,7 +52,7 @@ fn main() {
     //let y = fox.get_battery_charging_time_schedule(&inverter_sn);
     //let y = fox.get_current_soc(&inverter_sn);
     let y = fox.get_max_soc(&inverter_sn);
-    //let y = fox.set_max_soc(&inverter_sn, 95);
+    //let y = fox.set_max_soc(&inverter_sn, 100);
     //let y = fox.set_device_time(&inverter_sn, Local::now());
     //let y = fox.set_min_soc_on_grid(&inverter_sn, 45);
     //let y = fox.set_battery_charging_time_schedule(
@@ -50,4 +70,5 @@ fn main() {
         Err(e) => { println!("Error: {}", e); }
     }
     println!("{}", x);
+    */
 }
