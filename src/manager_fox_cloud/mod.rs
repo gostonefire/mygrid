@@ -5,10 +5,10 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use crate::models::charging_time_schedule::{ChargingTime, ChargingTimeResult, ChargingTimeSchedule};
-use crate::models::soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
-use crate::models::device_details::{DeviceDetailsResult, DeviceDetails};
-use crate::models::device_time::{DeviceTime, DeviceTimeResult, RequestTime};
+use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeResult, ChargingTimeSchedule};
+use crate::models::fox_soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
+use crate::models::fox_device_details::{DeviceDetailsResult, DeviceDetails};
+use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
 

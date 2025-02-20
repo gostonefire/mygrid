@@ -30,21 +30,9 @@ pub struct FullForecast {
     pub time_series: Vec<FullTimeSeries>,
 }
 
-#[derive(Debug)]
-pub struct Parameter {
-    pub name: String,
-    pub value: f64,
-}
-
-#[derive(Debug)]
-pub struct TimeSeries {
+#[derive(Debug, Copy, Clone)]
+pub struct TimeValues {
     pub valid_time: DateTime<Local>,
-    pub parameters: Parameter,
-}
-
-#[derive(Debug)]
-pub struct Forecast {
-    pub approved_time: DateTime<Local>,
-    pub reference_time: DateTime<Local>,
-    pub time_series: Vec<TimeSeries>,
+    pub temp: f64,
+    pub cloud: f64,
 }

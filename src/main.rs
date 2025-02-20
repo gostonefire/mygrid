@@ -1,8 +1,12 @@
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc};
 use std::env;
+use std::fmt::Debug;
 use std::ops::Add;
 use reqwest::header::DATE;
 use crate::charge_level::{get_charge_level};
+use crate::manager_nordpool::NordPool;
+use crate::manager_smhi::SMHI;
+use crate::time_blocks::create_schedule;
 
 mod manager_nordpool;
 mod manager_fox_cloud;
@@ -10,6 +14,7 @@ mod manager_sun;
 mod models;
 mod manager_smhi;
 mod charge_level;
+mod time_blocks;
 
 const LAT: f64 = 56.22332313734338;
 const LONG: f64 = 15.658393416666142;
@@ -26,24 +31,43 @@ fn main() {
         Err(e) => {println!("Error getting inverter SN: {}", e); return;}
     }
 
-    let charge_level = get_charge_level(Local::now().add(TimeDelta::days(1)), vec![8, 9, 10]).unwrap();
-    println!("{}", charge_level);
+    let nordpool = NordPool::new();
+    let tariffs = nordpool.get_tariffs(Utc::now().add(TimeDelta::days(0))).unwrap();
 
+    let mut schedule = create_schedule(&tariffs);
+    //for s in &schedule.blocks {
+    //    println!("{}", s);
+    //}
+
+    let smhi = SMHI::new(LAT, LONG);
+    let forecast = smhi.get_cloud_forecast(Local::now().add(TimeDelta::days(0))).unwrap();
+
+    for b in 0..schedule.blocks.len() - 1 {
+        if schedule.blocks[b].block_type.eq("C") {
+            let block = schedule.blocks.get_mut(b + 1).unwrap();
+            let selected_hours = (block.start_hour..=block.end_hour).map(|b| b).collect::<Vec<usize>>();
+            let charge_level = get_charge_level(selected_hours, &forecast);
+            block.min_soc_on_grid = Some(charge_level);
+            schedule.blocks[b].max_soc = charge_level;
+        }
+    }
 
     /*
-    56.22332313734338, 15.658393416666142
-    let nordpool = manager_nordpool::NordPool::new();
-    let y = nordpool.get_tariffs(Utc::now().add(TimeDelta::days(1)));
-    match y {
-        Ok(r) => {
-            for d in r.multi_area_entries {
-                println!("{:?}: {:0.2}kr", d.delivery_start.naive_local().time(), (d.entry_per_area.se4 / 10f64).round() / 100f64);
-            }
-        },
-        Err(e) => { println!("Error: {}", e); }
+    for block in schedule.blocks.iter_mut() {
+        if block.block_type.eq("C") {
+            let selected_hours = (block.start_hour..=block.end_hour).map(|b| b as u32).collect::<Vec<u32>>();
+            let charge_level = get_charge_level(selected_hours, &forecast).unwrap();
+            block.max_soc = charge_level as f64;
+        }
     }
-*/
-/*
+
+     */
+
+    for s in &schedule.blocks {
+        println!("{}", s);
+    }
+
+    /*
     let fox = manager_fox_cloud::Fox::new(api_key);
 
     //let y = fox.get_device_detail(SN);
