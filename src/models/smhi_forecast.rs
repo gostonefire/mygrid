@@ -5,10 +5,6 @@ use chrono::Local;
 #[derive(Deserialize)]
 pub struct FullParameters {
     pub name: String,
-    #[serde(rename = "levelType")]
-    pub level_type: String,
-    pub level: i64,
-    pub unit: String,
     pub values: Vec<f64>,
 }
 
@@ -22,10 +18,6 @@ pub struct FullTimeSeries {
 
 #[derive(Deserialize)]
 pub struct FullForecast {
-    #[serde(rename = "approvedTime")]
-    pub approved_time: DateTime<Local>,
-    #[serde(rename = "referenceTime")]
-    pub reference_time: DateTime<Local>,
     #[serde(rename = "timeSeries")]
     pub time_series: Vec<FullTimeSeries>,
 }

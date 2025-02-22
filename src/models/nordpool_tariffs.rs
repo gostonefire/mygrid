@@ -12,16 +12,12 @@ pub struct EntryPerArea {
 pub struct MultiAreaEntries {
     #[serde(rename = "deliveryStart")]
     pub delivery_start: DateTime<Local>,
-    #[serde(rename = "deliveryEnd")]
-    pub delivery_end: DateTime<Local>,
     #[serde(rename = "entryPerArea")]
     pub entry_per_area: EntryPerArea,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Tariffs {
-    #[serde(rename = "deliveryDateCET")]
-    pub delivery_date_cet: String,
     #[serde(rename = "multiAreaEntries")]
     pub multi_area_entries: Vec<MultiAreaEntries>,
 }

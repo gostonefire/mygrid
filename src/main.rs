@@ -1,11 +1,11 @@
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc};
+use chrono::{Local, TimeDelta, Utc};
 use std::env;
-use std::fmt::Debug;
 use std::ops::Add;
-use reqwest::header::DATE;
 use crate::charge_level::{get_charge_level};
+use crate::consumption::Consumption;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
+use crate::production::PVProduction;
 use crate::time_blocks::create_schedule;
 
 mod manager_nordpool;
@@ -15,9 +15,13 @@ mod models;
 mod manager_smhi;
 mod charge_level;
 mod time_blocks;
+mod production;
+mod consumption;
 
 const LAT: f64 = 56.22332313734338;
 const LONG: f64 = 15.658393416666142;
+
+
 
 fn main() {
     let api_key: String;
@@ -32,7 +36,7 @@ fn main() {
     }
 
     let nordpool = NordPool::new();
-    let tariffs = nordpool.get_tariffs(Utc::now().add(TimeDelta::days(0))).unwrap();
+    let tariffs = nordpool.get_tariffs(Utc::now().add(TimeDelta::days(1))).unwrap();
 
     let mut schedule = create_schedule(&tariffs);
     //for s in &schedule.blocks {
@@ -40,13 +44,16 @@ fn main() {
     //}
 
     let smhi = SMHI::new(LAT, LONG);
-    let forecast = smhi.get_cloud_forecast(Local::now().add(TimeDelta::days(0))).unwrap();
+    let forecast = smhi.get_cloud_forecast(Local::now().add(TimeDelta::days(1))).unwrap();
+
+    let production = PVProduction::new(&forecast, LAT, LONG);
+    let consumption = Consumption::new(&forecast);
 
     for b in 0..schedule.blocks.len() - 1 {
         if schedule.blocks[b].block_type.eq("C") {
             let block = schedule.blocks.get_mut(b + 1).unwrap();
             let selected_hours = (block.start_hour..=block.end_hour).map(|b| b).collect::<Vec<usize>>();
-            let charge_level = get_charge_level(selected_hours, &forecast);
+            let charge_level = get_charge_level(selected_hours, &production, &consumption);
             block.min_soc_on_grid = Some(charge_level);
             schedule.blocks[b].max_soc = charge_level;
         }

@@ -7,7 +7,6 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeResult, ChargingTimeSchedule};
 use crate::models::fox_soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
-use crate::models::fox_device_details::{DeviceDetailsResult, DeviceDetails};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
@@ -24,22 +23,6 @@ impl Fox {
             api_key,
             client,
         }
-    }
-
-    /// Obtains inverter details.
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20detail0a3ca20id3dget20device20detail4303e203ca3e
-    ///
-    /// # Arguments
-    ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_device_detail(&self, sn: &str) -> Result<DeviceDetails, String> {
-        let path = "/op/v0/device/detail";
-        let json = self.get_request(&path, vec![("sn", sn)])?;
-
-        let fox_data: DeviceDetailsResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-
-        Ok(fox_data.result)
     }
 
     /// Obtain the battery current soc (state of charge)

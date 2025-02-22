@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
-use crate::{manager_sun, LAT, LONG};
-use crate::models::smhi_forecast::{TimeValues};
+use crate::consumption::Consumption;
+use crate::production::PVProduction;
 
-const MAX_PV_W: f64 = 6000.0;
+/// The battery capacity in watts divided by the max SoC (State of Charge). This represents
+/// roughly how much each percentage of the SoC is in terms of power (Wh)
 const SOC_CAPACITY_W: f64 = 16590.0 / 100.0;
 
 /// Get charge level for a given day and selected hours
@@ -11,15 +10,15 @@ const SOC_CAPACITY_W: f64 = 16590.0 / 100.0;
 /// # Arguments
 ///
 /// * 'selected_hours' - hours of the date to include in calculation
-/// * 'forecast' - whether forecast including temperatures and cloud indexes
-pub fn get_charge_level(selected_hours: Vec<usize>, forecast: &[TimeValues;24]) -> f64 {
-    let pv_production = get_hour_pv_production(forecast);
-    let hour_load = get_hour_load(forecast);
-
-    let segment = pv_production
+/// * 'production' - struct containing estimated hourly production levels
+/// * 'consumption' - struct containing estimated hourly load levels
+pub fn get_charge_level(selected_hours: Vec<usize>, production: &PVProduction, consumption: &Consumption) -> f64 {
+    let segment = production.get_production()
         .iter().enumerate()
         .filter(|(h, _)| selected_hours.contains(h))
-        .map(|(h, &p)| calculate_spare_capacity(p, hour_load[h]))
+        .map(|(h, &p)|
+            calculate_spare_capacity(p, consumption.get_consumption(h), consumption.get_min_avg_load())
+        )
         .sum::<f64>();
 
     (100.0 - segment / SOC_CAPACITY_W).floor()
@@ -34,34 +33,34 @@ pub fn get_charge_level(selected_hours: Vec<usize>, forecast: &[TimeValues;24]) 
 ///
 /// * 'production' - production in watts from PV
 /// * 'load' - the household load in watts (i.e. not grid consumption which may include battery charging)
-fn calculate_spare_capacity(production: f64, load: f64) -> f64 {
+/// * 'min_avg_load' - min average consumption/load in watts over an hour
+fn calculate_spare_capacity(production: f64, load: f64, min_avg_load: f64) -> f64 {
     let diff = production - load;
     if diff < 0.0 {
-        diff.abs() / 2.0
+        println!("Under: {}, {}: {}", production, load, (production - min_avg_load).max(0.0) / 2.0);
+        (production - min_avg_load).max(0.0) / 2.0
     } else {
+        println!("Over:  {}, {}: {}", production, load, diff);
         diff
     }
 }
 
+/*
 /// Calculates hourly household load based on temperature forecast
-/// The forecasted load is approximated as (right exclusive and in Wh/h):
-/// *    ->  0: 3000
-/// *  0 ->  5: 2500
-/// *  5 -> 10: 2000
-/// * 10 -> 15: 1500
-/// * 15 -> 20: 1000
-/// * 20 ->   : 500
+///
+/// The load is linearly calculated between MAX_AVG_LOAD and MIN_AVG_LOAD where
+/// temperature is truncated to the range 0..=20
 ///
 /// # Arguments
 ///
 /// * 'forecast' - the temperature forecast
 fn get_hour_load(forecast: &[TimeValues;24]) -> [f64;24] {
-    let mean_load: [f64;6] = [3000.0, 2500.0, 2000.0, 1500.0, 1000.0, 500.0];
     let mut hour_load: [f64;24] = [0.0;24];
 
     for (h, v) in forecast.iter().enumerate() {
-        let load = ((v.temp + 0.1) / 5.0).ceil().max(0.0).min(5.0) as usize;
-        hour_load[h] = mean_load[load];
+        let load_factor = 1.0 - v.temp.max(0.0).min(20.0) / 20.0;
+        let load = load_factor * (MAX_AVG_LOAD - MIN_AVG_LOAD) + MIN_AVG_LOAD;
+        hour_load[h] = load;
     }
 
     hour_load
@@ -74,7 +73,6 @@ fn get_hour_load(forecast: &[TimeValues;24]) -> [f64;24] {
 /// * 'forecast' - the cloud forecast
 fn get_hour_pv_production(forecast: &[TimeValues;24]) -> [f64;24] {
     let mut pv_production: [f64;24] = [0.0;24];
-    //let mut pv_production: HashMap<u32, f64> = HashMap::new();
     let (_, max_elevation) = get_max_sun_elevations();
 
     for (h, v) in forecast.iter().enumerate() {
@@ -90,48 +88,6 @@ fn get_hour_pv_production(forecast: &[TimeValues;24]) -> [f64;24] {
     pv_production
 }
 
-/*
-/// Calculates hourly sun indexes based on cloud forecast and sun elevations
-///
-/// # Arguments
-///
-/// * 'forecast' - the cloud forecast of the given date time
-fn get_hour_sun_indexes(forecast: &Forecast) -> Result<HashMap<u32, f64>, String> {
-    let mut sun_indexes: HashMap<u32, f64> = HashMap::new();
-    let (max_elevations, max_elevation) = get_max_sun_elevations();
-    let norm_value = get_charge_norm_value(max_elevations, max_elevation);
-
-    //let smhi = manager_smhi::SMHI::new(LAT, LONG);
-    //let forecast = smhi.get_cloud_forecast(date_time)?;
-    for h in &forecast.time_series {
-        let declination = manager_sun::get_declination(h.valid_time);
-        let elevation = manager_sun::get_elevation(h.valid_time, LAT, LONG, declination);
-
-        if elevation > 0.0 {
-            let charge_index = get_charge_index(elevation, max_elevation, h.parameters.value);
-            sun_indexes.insert(h.valid_time.hour(), charge_index / norm_value);
-        } else {
-            sun_indexes.insert(h.valid_time.hour(), 0.0);
-        }
-    }
-
-    Ok(sun_indexes)
-}
-
-
-
-/// Calculates the charge norm value for normalizing the sum of hourly day charge indexes
-/// to a value between 0 and 1
-fn get_charge_norm_value(max_elevations: HashMap<u32, f64>, max_elevation: f64) -> f64 {
-    let mut norm_value = 0.0;
-    for hour in 0..=23 {
-        let elevation = *max_elevations.get(&hour).unwrap();
-        norm_value += get_charge_index(elevation, max_elevation, 0.0);
-    }
-
-    norm_value
-}
-*/
 
 /// Calculates the charge index for a specific sun elevation and cloud index.
 /// This function holds the business rule that is used both for daily
@@ -148,7 +104,10 @@ fn get_charge_norm_value(max_elevations: HashMap<u32, f64>, max_elevation: f64) 
 /// * 'cloud_index' - the cloud index given from SMHI (0-8)
 fn get_charge_index(elevation: f64, max_elevation: f64, cloud_index: f64) -> f64 {
     if elevation > 0.0 {
-        0.9764 * (elevation / max_elevation) + 0.1236 * ((8.0 - cloud_index) / 8.0)
+        let sun_index = CHARGE_INDEX_SUN_FACTOR * (elevation / max_elevation);
+        let cloud_index = (1.0 - CHARGE_INDEX_SUN_FACTOR) * ((8.0 - cloud_index) / 8.0);
+
+        sun_index + cloud_index
     } else {
         0.0
     }
@@ -173,3 +132,5 @@ fn get_max_sun_elevations() -> (HashMap<u32, f64>, f64) {
 
     (max_sun_elevations, max_elevation)
 }
+
+ */

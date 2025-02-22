@@ -2,8 +2,6 @@ use std::f64::consts::PI;
 use chrono::{DateTime, Datelike, Local, Timelike};
 use trig::Trig;
 
-// https://www.pveducation.org/pvcdrom/properties-of-sunlight/elevation-angle
-
 /// Calculates the declination given a medium exact algorithm as described
 /// here: https://www.reuk.co.uk/wordpress/solar/solar-declination/
 ///
@@ -42,11 +40,3 @@ pub fn get_elevation(date: DateTime<Local>, lat: f64, long: f64, declination: f6
     (declination.sind() * lat.sind() + declination.cosd() * lat.cosd() * hra.cosd()).asind()
 }
 
-/// Returns sun elevation at noon solstice
-///
-/// # Arguments
-///
-/// * 'lat' - the latitude given in decimal format
-pub fn get_max_elevation(lat: f64) -> f64 {
-    90.0 - 23.44 - lat
-}
