@@ -1,11 +1,11 @@
 use std::str::FromStr;
-use chrono::{DateTime, Datelike, Local, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeResult, ChargingTimeSchedule};
+use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
@@ -45,6 +45,7 @@ impl Fox {
         Ok(fox_data.result[0].datas[0].value.round() as u8)
     }
 
+    /*
     /// Obtain the inverter battery min soc on grid setting
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
@@ -64,6 +65,7 @@ impl Fox {
 
         Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
     }
+    */
 
     /// Set the inverter battery min soc on grid setting
     ///
@@ -123,6 +125,7 @@ impl Fox {
         Ok(())
     }
 
+    /*
     /// Obtain the battery charging time schedule.
     /// This is the standard charging scheduler setting.
     ///
@@ -139,6 +142,7 @@ impl Fox {
 
         Ok(fox_data.result)
     }
+    */
 
     /// Set the battery charging time schedule.
     /// This is the standard charging scheduler setting.
@@ -186,7 +190,7 @@ impl Fox {
     /// # Arguments
     ///
     /// * 'sn' - the serial number of the inverter
-    pub fn get_device_time(&self, sn: &str) -> Result<DeviceTime, String> {
+    pub fn get_device_time(&self, sn: &str) -> Result<NaiveDateTime, String> {
         let path = "/op/v0/device/time/get";
 
         let req = RequestTime { sn: sn.to_string() };
@@ -196,7 +200,9 @@ impl Fox {
 
         let fox_data: DeviceTimeResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
-        Ok(fox_data.result)
+        let device_time = Fox::device_time_to_date_time(&fox_data.result)?;
+
+        Ok(device_time)
     }
 
     /// Set the inverter local time
@@ -207,7 +213,7 @@ impl Fox {
     ///
     /// * 'sn' - the serial number of the inverter
     /// * 'date_time - date and time as a DateTime<Local>, i.e. OS local time
-    pub fn set_device_time(&self, sn: &str, date_time: DateTime<Local>) -> Result<(), String> {
+    pub fn set_device_time(&self, sn: &str, date_time: NaiveDateTime) -> Result<(), String> {
         let path = "/op/v0/device/time/set";
 
         let req = DeviceTime {
@@ -228,6 +234,7 @@ impl Fox {
         Ok(())
     }
 
+    /*
     /// Builds a request and sends it as a GET.
     /// The return is the json representation of the result as specified by
     /// respective FoxESS API
@@ -251,6 +258,7 @@ impl Fox {
 
         Ok(json)
     }
+    */
 
     /// Builds a request and sends it as a POST.
     /// The return is the json representation of the result as specified by
@@ -405,6 +413,29 @@ impl Fox {
             start_time_2: ChargingTime { hour: start_hour_2, minute: start_minute_2 },
             end_time_2: ChargingTime { hour: end_hour_2, minute: end_minute_2 },
         })
+    }
+
+    /// Converts a DeviceTime struct to the NaiveDateTime format.
+    /// Reason for going through NaiveDateTime is that the inverter is timezone unaware,
+    /// hence when passing between summer- and winter time there may be a gap where an hour
+    /// might hit a gap or a fold in time with time zone awareness.
+    ///
+    /// # Arguments
+    ///
+    /// * 'device_time' - the DeviceTime struct from the inverter response
+    fn device_time_to_date_time(device_time: &DeviceTime) -> Result<NaiveDateTime, String> {
+        let dt_string = format!("{}-{}-{} {}:{}:{}",
+                                device_time.year,
+                                device_time.month,
+                                device_time.day,
+                                device_time.hour,
+                                device_time.minute,
+                                device_time.second);
+
+        let naive_device_time = NaiveDateTime::parse_from_str(&dt_string, "%Y-%m-%d %H:%M:%S")
+            .map_err(|e| format!("Illegal date time format [{}]: {}", dt_string, e.to_string()))?;
+
+        Ok(naive_device_time)
     }
 }
 

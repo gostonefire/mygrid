@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+/*
 #[derive(Deserialize)]
 pub struct ChargingTimeResult {
     pub result: ChargingTimeSchedule,
 }
+*/
 
 #[derive(Serialize, Deserialize)]
 pub struct ChargingTimeSchedule {

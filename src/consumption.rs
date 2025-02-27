@@ -42,8 +42,8 @@ impl Consumption {
 
     /// Calculates hourly household consumption based on temperature forecast
     ///
-    /// The consumption is linearly calculated between MAX_AVG_LOAD and MIN_AVG_LOAD where
-    /// temperature is truncated to the range 0..=20
+    /// The consumption goes down quite drastically with warmer whether so some inverse exponential
+    /// or inverse power of X is probably going to be pretty close
     ///
     /// # Arguments
     ///
@@ -52,7 +52,9 @@ impl Consumption {
         let mut hour_load: [f64;24] = [0.0;24];
 
         for (h, v) in forecast.iter().enumerate() {
-            let load_factor = 1.0 - v.temp.max(0.0).min(20.0) / 20.0;
+            //let load_factor = 1.0 - v.temp.max(0.0).min(20.0) / 20.0;
+            let temp = v.temp.max(0.0).min(20.0);
+            let load_factor = (20.0 - temp).powi(5) / 20.0_f64.powi(5);
             let load = load_factor * (MAX_AVG_LOAD - MIN_AVG_LOAD) + MIN_AVG_LOAD;
             hour_load[h] = load;
         }

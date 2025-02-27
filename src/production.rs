@@ -7,7 +7,7 @@ const MAX_PV_POWER: f64 = 6000.0;
 
 /// The factor on how much of the sun elevation should contribute to the overall PV output
 /// in comparison to cloud index
-const PRODUCTION_SUN_FACTOR: f64 = 0.9764;
+const PRODUCTION_SUN_FACTOR: f64 = 0.5;
 
 /// Struct for calculating and holding PV production per hour given a whether forecast
 ///

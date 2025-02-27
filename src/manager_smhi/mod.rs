@@ -25,6 +25,7 @@ impl SMHI {
         Self { client, lat, long }
     }
 
+
     /// Retrieves a whether forecast from SMHI for the given date.
     /// The raw forecast consists of several days worth of data and many whether parameters
     /// but the returned forecast will only include the specified data and data
@@ -37,7 +38,7 @@ impl SMHI {
     /// # Arguments
     ///
     /// * 'date_time' - the date to get a forecast for
-    pub fn get_cloud_forecast(&self, date_time: DateTime<Local>) -> Result<[TimeValues;24], String> {
+    pub fn get_forecast(&self, date_time: DateTime<Local>) -> Result<[TimeValues;24], String> {
         let smhi_domain = "https://opendata-download-metfcst.smhi.se";
         let base_url = "/api/category/pmp3g/version/2/geotype/point";
         let url = format!("{}{}/lon/{:0.4}/lat/{:0.4}/data.json",
