@@ -1,6 +1,7 @@
 use std::collections::{HashSet};
 use std::fmt;
 use chrono::{Local, Timelike};
+use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
 use crate::production::PVProduction;
 
@@ -15,7 +16,7 @@ const USE_LEN: u8 = 5;
 const SOC_CAPACITY_W: f64 = 16590.0 / 100.0;
 
 /// Available block types
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockType {
     Charge,
     Hold,
@@ -34,7 +35,7 @@ impl fmt::Display for BlockType {
 }
 
 /// Block status
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
     Waiting,
     Started,
@@ -53,7 +54,7 @@ impl fmt::Display for Status {
 }
 
 /// Represents one block in a schedule
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub block_type: BlockType,
     pub max_soc: u8,
@@ -74,6 +75,7 @@ impl fmt::Display for Block {
 }
 
 /// Struct representing one day's block schedule
+#[derive(Serialize, Deserialize)]
 pub struct Schedule {
     pub blocks: Vec<Block>,
 }
@@ -239,8 +241,12 @@ impl Schedule {
             )
             .sum::<f64>() / selected_hours.len() as f64;
 
-        (100.0 - segment / SOC_CAPACITY_W).floor() as u8
-
+        let charge_level = (100.0 - segment / SOC_CAPACITY_W).floor() as u8;
+        if charge_level != 100 {
+            charge_level.min(95)
+        } else {
+            100
+        }
     }
 
     /// Calculates what spare capacity in watts that is needed to cover for either irregularities
@@ -260,10 +266,8 @@ impl Schedule {
             } else {
                 diff = ((production - min_avg_load).max(0.0) / 2.0).max(5.0 * SOC_CAPACITY_W);
             }
-            println!("Under: {}, {}: {}", production, load, diff);
         } else {
             diff = diff.max(10.0 * SOC_CAPACITY_W);
-            println!("Over:  {}, {}: {}", production, load, diff);
         }
         diff
     }

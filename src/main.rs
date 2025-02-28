@@ -1,8 +1,11 @@
 use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike, Utc};
 use std::{env, thread};
+use std::fs::File;
+use std::io::{Read, Write};
 use std::ops::{Add};
 use std::process::exit;
 use std::time::Duration;
+use glob::glob;
 use crate::consumption::Consumption;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
@@ -29,6 +32,7 @@ const LONG: f64 = 15.658393416666142;
 fn main() {
     let api_key: String;
     let inverter_sn: String;
+    let backup_dir: String;
     match env::var("FOX_ESS_API_KEY") {
         Ok(v) => api_key = v,
         Err(e) => {eprintln!("Error getting API key: {}", e); return;}
@@ -37,18 +41,25 @@ fn main() {
         Ok(v) => inverter_sn = v,
         Err(e) => {eprintln!("Error getting inverter SN: {}", e); return;}
     }
+    match env::var("BACKUP_DIR") {
+        Ok(v) => backup_dir = v,
+        Err(e) => {eprintln!("Error getting backup directory: {}", e); return;}
+    }
 
     // Instantiate structs
     let fox = Fox::new(api_key);
     let nordpool = NordPool::new();
     let smhi = SMHI::new(LAT, LONG);
 
+    //let _ = retry!(||fox.set_max_soc(&inverter_sn, 100)).unwrap();
+    //return;
+
     // Check and possibly set the local clock in the inverter
-    check_inverter_local_time(&fox, &inverter_sn);
+    //check_inverter_local_time(&fox, &inverter_sn);
 
     // Create a first base schedule given only tariffs, charge level will later be updated
     let mut schedule: Schedule;
-    match create_new_schedule(&nordpool, &smhi, Some(1)) {
+    match create_new_schedule(&nordpool, &smhi, None) {
         Ok(s) => schedule = s,
         Err(e) => {
             eprintln!("Error creating new schedule while starting up: {}", e);
@@ -59,11 +70,25 @@ fn main() {
         println!("{}", s);
     }
 
+    // Check if we have an existing schedule for the day that then may be updated with
+    // already started/running blocks
+    match load_schedule(&backup_dir) {
+        Ok(option) => {
+            if let Some(s) = option {
+                schedule = s;
+            };
+        },
+        Err(_) => {}
+    }
+    for s in &schedule.blocks {
+        println!("{}", s);
+    }
+
     // Main loop that runs once a minute
     let mut local_now: DateTime<Local>;
     let mut day_of_year = Local::now().ordinal0();
     loop {
-        thread::sleep(Duration::from_secs(60));
+        thread::sleep(Duration::from_secs(10));
         local_now = Local::now();
         if day_of_year != local_now.ordinal0() {
             check_inverter_local_time(&fox, &inverter_sn);
@@ -103,6 +128,11 @@ fn main() {
             }
             schedule.update_block_status(b, Status::Started).unwrap();
 
+            // Save current schedule version
+            save_schedule(&schedule, &backup_dir);
+            for s in &schedule.blocks {
+                println!("{}", s);
+            }
         }
     }
 }
@@ -130,16 +160,19 @@ fn print_error(start_time: DateTime<Local>, error: String, block: &Block) {
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 fn check_inverter_local_time(fox: &Fox, sn: &str) {
-    let mut err: String = "".to_string();
+    let err: String;
     match retry!(||fox.get_device_time(sn)) {
         Ok(dt) => {
             let now = Local::now().naive_local();
+            let delta = (now - dt).abs();
 
-            if now - dt > chrono::Duration::minutes(1) {
+            if delta > chrono::Duration::minutes(1) {
                 match fox.set_device_time(sn, now) {
                     Ok(_) => { return },
                     Err(e) => { err = e }
                 }
+            } else {
+                return;
             }
         },
         Err(e) => { err = e }
@@ -160,6 +193,9 @@ fn check_inverter_local_time(fox: &Fox, sn: &str) {
 /// * 'sn' - serial number of the inverter
 /// * 'block' - the configuration to use
 fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<(), String> {
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
+
     let _ = retry!(||fox.set_max_soc(sn, block.max_soc))?;
     let _ = retry!(||fox.set_battery_charging_time_schedule(
                         sn,
@@ -188,6 +224,9 @@ fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<(), String> {
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 fn set_hold(fox: &Fox, sn: &str) -> Result<(), String> {
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    println!("{} - Setting hold block",report_time);
+
     let _ = retry!(||fox.set_battery_charging_time_schedule(
                         sn,
                         false, 0, 0, 0, 0,
@@ -215,6 +254,9 @@ fn set_hold(fox: &Fox, sn: &str) -> Result<(), String> {
 /// * 'sn' - serial number of the inverter
 
 fn set_use(fox: &Fox, sn: &str) -> Result<(), String> {
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    println!("{} - Setting use block",report_time);
+
     let _ = retry!(||fox.set_battery_charging_time_schedule(
                         sn,
                         false, 0, 0, 0, 0,
@@ -263,5 +305,82 @@ fn update_existing_schedule(schedule: &mut Schedule, smhi: &SMHI) {
             eprintln!("Error updating schedule for block: {}", e);
             eprintln!("This is recoverable, it only affects charge levels")
         }
+    }
+}
+
+/// Saves schedule to file as json
+/// The filename gives at most one unique file per hour
+///
+/// # Arguments
+///
+/// * 'schedule' - the schedule to save
+/// * 'backup_dir' - the directory to save the file to
+fn save_schedule(schedule: &Schedule, backup_dir: &str) {
+    let err: String;
+    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d_%H"));
+    match serde_json::to_string(&schedule) {
+        Ok(json) => {
+            match File::create(file_path) {
+                Ok(mut file) => {
+                    match file.write_all(json.as_bytes()) {
+                        Ok(_) => { return },
+                        Err(e) => { err = e.to_string() }
+                    }
+                },
+                Err(e) => { err = e.to_string() }
+            }
+        },
+        Err(e) => { err = e.to_string() }
+    }
+    eprintln!("Error writing schedule to file: {}", err);
+    eprintln!("This is recoverable")
+}
+
+/// Loads schedule from json on file
+///
+/// This is mostly to avoid re-executing an already started block, hence it will just find
+/// the latest saved schedule for the current day
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+fn load_schedule(backup_dir: &str) -> Result<Option<Schedule>, String> {
+    let mut entries: Vec<String> = Vec::new();
+    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d*"));
+    for entry in glob(&file_path)
+        .map_err(|e| format!("Error searching directory: {}", e.to_string()))? {
+        match entry {
+            Ok(path) => {
+                if path.is_file() {
+                    if let Some(os_path) = path.to_str() {
+                        entries.push(os_path.to_string());
+                    }
+                }
+            },
+            Err(e) => {
+                return Err(format!("Error reading directory entry: {}", e.to_string()));
+            }
+        }
+    }
+
+    entries.sort();
+
+    if entries.len() > 0 {
+        match File::open(&entries[entries.len() - 1]) {
+            Ok(mut file) => {
+                let mut contents = String::new();
+                match file.read_to_string(&mut contents).map_err(|e| e.to_string()) {
+                    Ok(_) => {
+                        let schedule: Schedule = serde_json::from_str(&contents)
+                            .map_err(|e| format!("Error while parsing json to Schedule: {}", e.to_string()))?;
+                        Ok(Some(schedule))
+                    },
+                    Err(e) => { Err(format!("Error while reading backup file: {}", e.to_string())) }
+                }
+            },
+            Err(e) => { Err(format!("Error while open schedule file: {}", e.to_string())) }
+        }
+    } else {
+        Ok(None)
     }
 }
