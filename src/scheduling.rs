@@ -421,7 +421,7 @@ impl Schedule {
                 let mut prices: Vec<f64> = vec![tariffs[start_hour as usize]];
                 for hour2 in (start_hour + 1)..(start_hour + max_block_len).min(24) {
                     if tariffs[hour2 as usize] >= min_price {
-                        prices.push(tariffs[hour2 as usize] as f64);
+                        prices.push(tariffs[hour2 as usize]);
                     } else {
                         break;
                     }
