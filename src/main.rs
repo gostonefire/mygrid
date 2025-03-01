@@ -1,7 +1,7 @@
-use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike, Utc};
-use std::{env, thread};
+use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike};
+use std::{env, fs, thread};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::ops::{Add};
 use std::process::exit;
 use std::time::Duration;
@@ -54,9 +54,6 @@ fn main() {
     //let _ = retry!(||fox.set_max_soc(&inverter_sn, 100)).unwrap();
     //return;
 
-    // Check and possibly set the local clock in the inverter
-    //check_inverter_local_time(&fox, &inverter_sn);
-
     // Create a first base schedule given only tariffs, charge level will later be updated
     let mut schedule: Schedule;
     match create_new_schedule(&nordpool, &smhi, None) {
@@ -69,6 +66,7 @@ fn main() {
     for s in &schedule.blocks {
         println!("{}", s);
     }
+    println!("================================================================================");
 
     // Check if we have an existing schedule for the day that then may be updated with
     // already started/running blocks
@@ -83,6 +81,8 @@ fn main() {
     for s in &schedule.blocks {
         println!("{}", s);
     }
+    println!("================================================================================");
+
 
     // Main loop that runs once a minute
     let mut local_now: DateTime<Local>;
@@ -103,6 +103,21 @@ fn main() {
             }
         }
 
+        if let Some(b) = schedule.get_current_started_charge(local_now.hour() as u8) {
+            if local_now.minute() % 5 == 0 {
+                match set_full_if_done(&fox, &inverter_sn, schedule.blocks[b].max_soc) {
+                    Ok(Some(status)) => {
+                        schedule.update_block_status(b, status).unwrap();
+                        save_schedule(&schedule, &backup_dir);
+                    }
+                    Err(e) => {
+                        print_error(local_now, e, None);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if let Some(b) = schedule.get_eligible_for_start(local_now.hour() as u8) {
             let mut block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
@@ -111,18 +126,18 @@ fn main() {
                     block = schedule.get_block_clone(b).unwrap();
 
                     if let Err(e) = set_charge(&fox, &inverter_sn, &block) {
-                        print_error(local_now, e, &block);
+                        print_error(local_now, e, Some(&block));
                     }
 
                 },
                 BlockType::Hold => {
-                    if let Err(e) = set_hold(&fox, &inverter_sn) {
-                        print_error(local_now, e, &block);
+                    if let Err(e) = set_hold(&fox, &inverter_sn, block.max_min_soc) {
+                        print_error(local_now, e, Some(&block));
                     }
                 },
                 BlockType::Use => {
                     if let Err(e) = set_use(&fox, &inverter_sn) {
-                        print_error(local_now, e, &block);
+                        print_error(local_now, e, Some(&block));
                     }
                 },
             }
@@ -133,6 +148,7 @@ fn main() {
             for s in &schedule.blocks {
                 println!("{}", s);
             }
+            println!("================================================================================");
         }
     }
 }
@@ -144,13 +160,13 @@ fn main() {
 /// * 'start_time' - time when block started to be set
 /// * 'error' - error reported from block start function
 /// * 'block' - block that caused the error
-fn print_error(start_time: DateTime<Local>, error: String, block: &Block) {
+fn print_error(start_time: DateTime<Local>, error: String, block: Option<&Block>) {
     let start_time = format!("{}", start_time.format("%Y-%m-%d %H:%M:%S"));
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     eprintln!("================================================================================");
     eprintln!("Start Time: {}, Report Time: {}", start_time, report_time);
     eprintln!("Unrecoverable error while setting block: {}", error);
-    eprintln!("Block:\n{}", block)
+    eprintln!("Block:\n{}", block.map_or_else(|| "None".to_string(), |b| b.to_string()));
 }
 
 /// checks the local clock in the inverter and sets it correctly if it has drifted more than a minute
@@ -206,14 +222,46 @@ fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<(), String> {
     Ok(())
 }
 
+/// Sets a charge block to Full in the inverter if it has reached it's max soc
+///
+/// This is similar to a hold block if the current soc is found to be equal or greater
+/// than the given max soc. If so, the charge schedule is disabled, the given max soc is
+/// used as new min soc on grid and finally the max soc is set to 100%
+///
+/// # Arguments
+///
+/// * 'fox' - reference to the Fox struct
+/// * 'sn' - serial number of the inverter
+/// * 'max_soc' - max soc
+fn set_full_if_done(fox: &Fox, sn: &str, max_soc: u8) -> Result<Option<Status>, String> {
+    let soc= retry!(||fox.get_current_soc(sn))?;
+    if soc >= max_soc {
+        let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        println!("{} - Setting charge block to full",report_time);
+
+        let _ = retry!(||fox.set_battery_charging_time_schedule(
+                        sn,
+                        false, 0, 0, 0, 0,
+                        false, 0, 0, 0, 0,
+                    ))?;
+
+        let min_soc = max_soc.max(10).min(100);
+        let _ = retry!(||fox.set_min_soc_on_grid(sn, min_soc))?;
+        let _ = retry!(||fox.set_max_soc(sn, 100))?;
+
+        Ok(Some(Status::Full))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Sets a hold block in the inverter
 ///
 /// The logic for a hold block is a little busy since there is no equivalent in the inverter:
 /// * disable any charge block just to make sure that it isn't surviving to the next day
-/// * retrieve the current max soc settings from the inverter
 /// * retrieve the current soc from the invert
-/// * get the lowest of the two soc values
-///     * charge block may have exceeded it with PV power so soc is too high, in which we use max soc
+/// * get the lowest of the two values max_min_soc and soc
+///     * charge block may have exceeded it with PV power so soc is too high, in which we use max min soc
 ///     * charge block may have not fully reached max soc, in which case we use current soc
 /// * make sure that we are within global limits, i.e. 10-100
 /// * set the min soc on grid in the inverter
@@ -223,7 +271,8 @@ fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<(), String> {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
-fn set_hold(fox: &Fox, sn: &str) -> Result<(), String> {
+/// * 'max_min_soc' - max min soc allowed for the block
+fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<(), String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting hold block",report_time);
 
@@ -232,9 +281,9 @@ fn set_hold(fox: &Fox, sn: &str) -> Result<(), String> {
                         false, 0, 0, 0, 0,
                         false, 0, 0, 0, 0,
                     ))?;
-    let max_soc= retry!(||fox.get_max_soc(sn))?;
-    let soc= retry!(||fox.get_current_soc(sn))?;
-    let min_soc = max_soc.min(soc).max(10).min(100);
+
+    let soc = retry!(||fox.get_current_soc(sn))?;
+    let min_soc = max_min_soc.min(soc).max(10).min(100);
     let _ = retry!(||fox.set_min_soc_on_grid(sn, min_soc))?;
     let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
@@ -281,7 +330,7 @@ fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, future: Option<usize>) 
     let forecast = retry!(||smhi.get_forecast(Local::now().add(TimeDelta::days(d))))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
-    let tariffs = retry!(||nordpool.get_tariffs(Utc::now().add(TimeDelta::days(d))))?;
+    let tariffs = retry!(||nordpool.get_tariffs(Local::now().add(TimeDelta::days(d))))?;
     let mut schedule = Schedule::from_tariffs(&tariffs).update_status();
     schedule.update_charge_levels(&production, &consumption);
 
@@ -320,13 +369,8 @@ fn save_schedule(schedule: &Schedule, backup_dir: &str) {
     let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d_%H"));
     match serde_json::to_string(&schedule) {
         Ok(json) => {
-            match File::create(file_path) {
-                Ok(mut file) => {
-                    match file.write_all(json.as_bytes()) {
-                        Ok(_) => { return },
-                        Err(e) => { err = e.to_string() }
-                    }
-                },
+            match fs::write(file_path, json) {
+                Ok(_) => { return },
                 Err(e) => { err = e.to_string() }
             }
         },

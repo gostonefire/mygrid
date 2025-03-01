@@ -1,4 +1,4 @@
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Local, Timelike};
 use reqwest::blocking::{Client};
 use reqwest::StatusCode;
 use crate::models::nordpool_tariffs::Tariffs;
@@ -18,7 +18,7 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'date_time' - the date to retrieve prices for
-    pub fn get_tariffs(&self, date_time: DateTime<Utc>) -> Result<Vec<f64>, String> {
+    pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<f64>, String> {
         let url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices";
         let date = format!("{}", date_time.format("%Y-%m-%d"));
         let query = vec![

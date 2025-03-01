@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -6,7 +5,7 @@ use md5::{Digest, Md5};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
-use crate::models::fox_soc_settings::{SocSettingResult, SocCurrentResult, RequestSoc, RequestCurrentSoc, SetSoc};
+use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
@@ -86,6 +85,7 @@ impl Fox {
         Ok(())
     }
 
+    /*
     /// Obtain the inverter battery max soc
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
@@ -105,6 +105,7 @@ impl Fox {
 
         Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
     }
+    */
 
     /// Set the inverter battery max soc setting
     ///

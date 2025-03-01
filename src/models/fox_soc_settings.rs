@@ -28,6 +28,7 @@ pub struct RequestCurrentSoc {
     pub variables: Vec<String>,
 }
 
+/*
 #[derive(Deserialize)]
 pub struct SocSettingResult {
     pub result: SocSetting,
@@ -41,7 +42,7 @@ pub struct SocSetting {
     pub value: String,
 }
 
-/*
+
 #[derive(Deserialize)]
 pub struct SocSettingRange {
     pub min: f64,

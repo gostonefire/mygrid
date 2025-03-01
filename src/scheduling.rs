@@ -40,6 +40,7 @@ pub enum Status {
     Waiting,
     Started,
     Missed,
+    Full,
 }
 
 /// Implementation of the Display Trait for pretty print
@@ -49,6 +50,7 @@ impl fmt::Display for Status {
             Status::Waiting => write!(f, "Waiting"),
             Status::Started => write!(f, "Started"),
             Status::Missed  => write!(f, "Missed "),
+            Status::Full    => write!(f, "Full   "),
         }
     }
 }
@@ -57,6 +59,7 @@ impl fmt::Display for Status {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub block_type: BlockType,
+    pub max_min_soc: u8,
     pub max_soc: u8,
     pub start_hour: u8,
     pub end_hour: u8,
@@ -68,9 +71,9 @@ pub struct Block {
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} - {} -> {:>2} - {:>2}: maxSoc {:<3}, price {:0.3} {:?}",
+        write!(f, "{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, price {:0.3} {:?}",
                self.status, self.block_type, self.start_hour, self.end_hour,
-               self.max_soc, self.mean_price, self.hour_price)
+               self.max_min_soc, self.max_soc, self.mean_price, self.hour_price)
     }
 }
 
@@ -104,7 +107,8 @@ impl Schedule {
         let mut blocks: Vec<Block> = Vec::new();
         for s in segments.iter() {
             let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, s.0, s.1);
-            blocks = Self::get_use_block(&tariffs, charge_block.mean_price / 0.8, USE_LEN, charge_block.end_hour + 1, 23);
+            blocks = Self::get_use_block(&tariffs, charge_block.mean_price / 0.8, USE_LEN,
+                                         charge_block.end_hour + 1, 23);
             if !blocks.is_empty() {
                 schedule.blocks.push(charge_block);
                 schedule.blocks.push(blocks[0].clone());
@@ -166,8 +170,27 @@ impl Schedule {
                 self.blocks[b].max_soc = charge_level;
             }
         }
+        self.update_max_min_soc();
+    }
 
-        //self
+    /// Updates max minSoC for all non-charge blocks
+    /// This to avoid setting a too high min soc on grid for a hold block if a previous
+    /// block has been pushed higher than charge max soc (which reflects the wiggle room
+    /// for PV power given production/consumption estimates)
+    ///
+    fn update_max_min_soc(&mut self) {
+        if self.blocks.len() == 1 {
+            self.blocks[0].max_min_soc = 50;
+        } else {
+            let mut last_max_min_soc: u8 = 100;
+            for b in 0..self.blocks.len() {
+                if self.blocks[b].block_type == BlockType::Charge {
+                    last_max_min_soc = self.blocks[b].max_soc;
+                } else {
+                    self.blocks[b].max_min_soc = last_max_min_soc;
+                }
+            }
+        }
     }
 
     /// Updates block status for those blocks still in waiting but passed time
@@ -192,6 +215,24 @@ impl Schedule {
             if b.status == Status::Waiting && b.start_hour <= hour && b.end_hour >= hour {
                 return Some(i);
             }
+        }
+
+        None
+    }
+
+    /// Returns, if any, the index of a currently running charge block with status Started
+    ///
+    /// # Arguments
+    ///
+    /// * 'hour' - the hour to check for
+    pub fn get_current_started_charge(&self, hour: u8) -> Option<usize> {
+        for (i, _) in self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| {
+                b.block_type == BlockType::Charge && b.status == Status::Started && b.start_hour <= hour && b.end_hour >= hour
+            }) {
+            return Some(i);
         }
 
         None
@@ -291,6 +332,7 @@ impl Schedule {
             if block.start_hour != next_start_hour {
                 new_schedule.blocks.push(Self::create_hold_block(tariffs, next_start_hour, block.start_hour - 1));
             }
+
             next_start_hour = block.end_hour + 1;
             new_schedule.blocks.push(block);
         }
@@ -315,6 +357,7 @@ impl Schedule {
         let hour_price = tariffs[start as usize..=end as usize].to_vec();
         Block {
             block_type: BlockType::Hold,
+            max_min_soc: 100,
             max_soc: 100,
             start_hour: start,
             end_hour: end,
@@ -335,6 +378,7 @@ impl Schedule {
     fn get_charge_block(tariffs: &Vec<f64>, block_len: u8, start: u8, end: u8) -> Block {
         let mut block: Block = Block {
             block_type: BlockType::Charge,
+            max_min_soc: 100,
             max_soc: 0,
             start_hour: 0,
             end_hour: 0,
@@ -384,6 +428,7 @@ impl Schedule {
                 }
                 blocks.push(Block {
                     block_type: BlockType::Use,
+                    max_min_soc: 100,
                     max_soc: 100,
                     start_hour,
                     end_hour: start_hour + prices.len() as u8 - 1,
