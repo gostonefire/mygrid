@@ -113,36 +113,44 @@ fn main() {
                     Err(e) => {
                         print_error(local_now, e, None);
                     }
-                    _ => {}
+                    _ => ()
                 }
             }
         }
 
         if let Some(b) = schedule.get_eligible_for_start(local_now.hour() as u8) {
-            let mut status: Status = Status::Started;
+            let status: Status;
             let mut block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
                 BlockType::Charge => {
                     update_existing_schedule(&mut schedule, &smhi);
                     block = schedule.get_block_clone(b).unwrap();
 
-                    if let Err(e) = set_charge(&fox, &inverter_sn, &block) {
-                        print_error(local_now, e, Some(&block));
-                        status = Status::Error;
-                    }
-
+                    status = match set_charge(&fox, &inverter_sn, &block) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            print_error(local_now, e, Some(&block));
+                            Status::Error
+                        }
+                    };
                 },
                 BlockType::Hold => {
-                    if let Err(e) = set_hold(&fox, &inverter_sn, block.max_min_soc) {
-                        print_error(local_now, e, Some(&block));
-                        status = Status::Error;
-                    }
+                    status = match set_hold(&fox, &inverter_sn, block.max_min_soc) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            print_error(local_now, e, Some(&block));
+                            Status::Error
+                        }
+                    };
                 },
                 BlockType::Use => {
-                    if let Err(e) = set_use(&fox, &inverter_sn) {
-                        print_error(local_now, e, Some(&block));
-                        status = Status::Error;
-                    }
+                    status = match set_use(&fox, &inverter_sn) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            print_error(local_now, e, Some(&block));
+                            Status::Error
+                        }
+                    };
                 },
             }
             schedule.update_block_status(b, status).unwrap();
@@ -215,7 +223,7 @@ fn check_inverter_local_time(fox: &Fox, sn: &str) {
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 /// * 'block' - the configuration to use
-fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<Option<Status>, String> {
+fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<Status, String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
 
@@ -225,7 +233,7 @@ fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<Option<Status>, Stri
         let _ = retry!(||fox.set_min_soc_on_grid(sn, block.max_soc))?;
         let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
-        Ok(Some(Status::Full))
+        Ok(Status::Full)
     } else {
         let _ = retry!(||fox.set_max_soc(sn, block.max_soc))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
@@ -234,10 +242,8 @@ fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<Option<Status>, Stri
                         false, 0, 0, 0, 0,
                     ))?;
 
-        Ok(Some(Status::Started))
+        Ok(Status::Started)
     }
-
-
 }
 
 /// Sets a charge block to Full in the inverter if it has reached it's max soc
@@ -286,7 +292,7 @@ fn set_full_if_done(fox: &Fox, sn: &str, max_soc: u8) -> Result<Option<Status>, 
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 /// * 'max_min_soc' - max min soc allowed for the block
-fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<(), String> {
+fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<Status, String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting hold block",report_time);
 
@@ -297,7 +303,7 @@ fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<(), String> {
     let _ = retry!(||fox.set_min_soc_on_grid(sn, min_soc))?;
     let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
-    Ok(())
+    Ok(Status::Started)
 }
 
 /// Sets a use block in the inverter
@@ -312,7 +318,7 @@ fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<(), String> {
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 
-fn set_use(fox: &Fox, sn: &str) -> Result<(), String> {
+fn set_use(fox: &Fox, sn: &str) -> Result<Status, String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting use block",report_time);
 
@@ -320,7 +326,7 @@ fn set_use(fox: &Fox, sn: &str) -> Result<(), String> {
     let _ = retry!(||fox.set_min_soc_on_grid(sn, 10))?;
     let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
-    Ok(())
+    Ok(Status::Started)
 }
 
 /// Creates a new schedule including updating charge levels
