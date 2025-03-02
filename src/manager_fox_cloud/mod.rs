@@ -184,6 +184,19 @@ impl Fox {
         Ok(())
     }
 
+    /// Disables any current ongoing charging schedule in the inverter
+    ///
+    /// # Arguments
+    ///
+    /// * 'sn' - the serial number of the inverter
+    pub fn disable_charge_schedule(&self, sn: &str) -> Result<(), String> {
+        self.set_battery_charging_time_schedule(
+            sn,
+            false, 0, 0, 0, 0,
+            false, 0, 0, 0, 0,
+        )
+    }
+
     /// Obtain the inverter local time
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
