@@ -41,6 +41,7 @@ pub enum Status {
     Started,
     Missed,
     Full,
+    Error,
 }
 
 /// Implementation of the Display Trait for pretty print
@@ -51,6 +52,7 @@ impl fmt::Display for Status {
             Status::Started => write!(f, "Started"),
             Status::Missed  => write!(f, "Missed "),
             Status::Full    => write!(f, "Full   "),
+            Status::Error   => write!(f, "Error  "),
         }
     }
 }
@@ -274,6 +276,7 @@ impl Schedule {
     /// * 'production' - struct containing estimated hourly production levels
     /// * 'consumption' - struct containing estimated hourly load levels
     fn get_charge_level(selected_hours: Vec<u8>, production: &PVProduction, consumption: &Consumption) -> u8 {
+        /*
         let segment = production.get_production()
             .iter().enumerate()
             .filter(|(h, _)| selected_hours.contains(&(*h as u8)))
@@ -281,8 +284,24 @@ impl Schedule {
                 Self::calculate_spare_capacity(p, consumption.get_consumption(h), consumption.get_min_avg_load())
             )
             .sum::<f64>() / selected_hours.len() as f64;
+        */
+        let segment = production.get_production()
+            .iter().enumerate()
+            .filter(|(h, _)| selected_hours.contains(&(*h as u8)))
+            .map(|(h, &p)|
+                Self::calculate_spare_capacity(p, consumption.get_consumption(h), consumption.get_min_avg_load())
+            )
+            .filter(|sc| sc.round() as i64 != 0)
+            .fold((0usize, 0.0f64), |acc, el| (acc.0 + 1, acc.1 + el));
 
-        let charge_level = (100.0 - segment / SOC_CAPACITY_W).floor() as u8;
+        let charge_level: u8;
+        if segment.0 == 0 {
+            charge_level = 100;
+        } else {
+            charge_level = (100.0 - (segment.1 / segment.0 as f64) / SOC_CAPACITY_W).floor() as u8
+        }
+
+        // let charge_level = (100.0 - segment / SOC_CAPACITY_W).floor() as u8;
         if charge_level != 100 {
             charge_level.min(95)
         } else {
