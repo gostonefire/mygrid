@@ -119,6 +119,7 @@ fn main() {
         }
 
         if let Some(b) = schedule.get_eligible_for_start(local_now.hour() as u8) {
+            let mut status: Status = Status::Started;
             let mut block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
                 BlockType::Charge => {
@@ -127,21 +128,24 @@ fn main() {
 
                     if let Err(e) = set_charge(&fox, &inverter_sn, &block) {
                         print_error(local_now, e, Some(&block));
+                        status = Status::Error;
                     }
 
                 },
                 BlockType::Hold => {
                     if let Err(e) = set_hold(&fox, &inverter_sn, block.max_min_soc) {
                         print_error(local_now, e, Some(&block));
+                        status = Status::Error;
                     }
                 },
                 BlockType::Use => {
                     if let Err(e) = set_use(&fox, &inverter_sn) {
                         print_error(local_now, e, Some(&block));
+                        status = Status::Error;
                     }
                 },
             }
-            schedule.update_block_status(b, Status::Started).unwrap();
+            schedule.update_block_status(b, status).unwrap();
 
             // Save current schedule version
             save_schedule(&schedule, &backup_dir);
@@ -200,6 +204,9 @@ fn check_inverter_local_time(fox: &Fox, sn: &str) {
 /// Sets a charge block in the inverter
 ///
 /// The logic is quite simple:
+/// * check so max soc is greater than current soc
+///     * if not adjust min soc on grid according max soc end return status Full
+///     * reason for setting it to max soc is so there is room for estimated PV power
 /// * set the max soc which reflects how much room is needed for PV in following blocks
 /// * set the charge schedule
 ///
@@ -208,18 +215,29 @@ fn check_inverter_local_time(fox: &Fox, sn: &str) {
 /// * 'fox' - reference to the Fox struct
 /// * 'sn' - serial number of the inverter
 /// * 'block' - the configuration to use
-fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<(), String> {
+fn set_charge(fox: &Fox, sn: &str, block: &Block) -> Result<Option<Status>, String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
 
-    let _ = retry!(||fox.set_max_soc(sn, block.max_soc))?;
-    let _ = retry!(||fox.set_battery_charging_time_schedule(
+    let soc = retry!(||fox.get_current_soc(sn))?;
+    if soc >= block.max_soc {
+        let _ = retry!(||fox.disable_charge_schedule(sn))?;
+        let _ = retry!(||fox.set_min_soc_on_grid(sn, block.max_soc))?;
+        let _ = retry!(||fox.set_max_soc(sn, 100))?;
+
+        Ok(Some(Status::Full))
+    } else {
+        let _ = retry!(||fox.set_max_soc(sn, block.max_soc))?;
+        let _ = retry!(||fox.set_battery_charging_time_schedule(
                         sn,
                         true, block.start_hour, 0, block.end_hour, 59,
                         false, 0, 0, 0, 0,
                     ))?;
 
-    Ok(())
+        Ok(Some(Status::Started))
+    }
+
+
 }
 
 /// Sets a charge block to Full in the inverter if it has reached it's max soc
@@ -239,13 +257,9 @@ fn set_full_if_done(fox: &Fox, sn: &str, max_soc: u8) -> Result<Option<Status>, 
         let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
         println!("{} - Setting charge block to full",report_time);
 
-        let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        sn,
-                        false, 0, 0, 0, 0,
-                        false, 0, 0, 0, 0,
-                    ))?;
-
         let min_soc = max_soc.max(10).min(100);
+
+        let _ = retry!(||fox.disable_charge_schedule(sn))?;
         let _ = retry!(||fox.set_min_soc_on_grid(sn, min_soc))?;
         let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
@@ -258,12 +272,12 @@ fn set_full_if_done(fox: &Fox, sn: &str, max_soc: u8) -> Result<Option<Status>, 
 /// Sets a hold block in the inverter
 ///
 /// The logic for a hold block is a little busy since there is no equivalent in the inverter:
-/// * disable any charge block just to make sure that it isn't surviving to the next day
 /// * retrieve the current soc from the invert
 /// * get the lowest of the two values max_min_soc and soc
 ///     * charge block may have exceeded it with PV power so soc is too high, in which we use max min soc
 ///     * charge block may have not fully reached max soc, in which case we use current soc
 /// * make sure that we are within global limits, i.e. 10-100
+/// * disable any charge block just to make sure that it isn't surviving to the next day
 /// * set the min soc on grid in the inverter
 /// * set max soc to 100% in the inverter, we don't want to limit anything from PV
 ///
@@ -276,14 +290,10 @@ fn set_hold(fox: &Fox, sn: &str, max_min_soc: u8) -> Result<(), String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting hold block",report_time);
 
-    let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        sn,
-                        false, 0, 0, 0, 0,
-                        false, 0, 0, 0, 0,
-                    ))?;
-
     let soc = retry!(||fox.get_current_soc(sn))?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
+
+    let _ = retry!(||fox.disable_charge_schedule(sn))?;
     let _ = retry!(||fox.set_min_soc_on_grid(sn, min_soc))?;
     let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
@@ -306,11 +316,7 @@ fn set_use(fox: &Fox, sn: &str) -> Result<(), String> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting use block",report_time);
 
-    let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        sn,
-                        false, 0, 0, 0, 0,
-                        false, 0, 0, 0, 0,
-                    ))?;
+    let _ = retry!(||fox.disable_charge_schedule(sn))?;
     let _ = retry!(||fox.set_min_soc_on_grid(sn, 10))?;
     let _ = retry!(||fox.set_max_soc(sn, 100))?;
 
