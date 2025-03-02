@@ -1,9 +1,18 @@
 use std::collections::{HashSet};
-use std::fmt;
-use chrono::{Local, Timelike};
+use std::{fmt, fs};
+use std::fs::File;
+use std::io::Read;
+use std::ops::Add;
+use std::thread;
+use std::time::Duration;
+use chrono::{Local, TimeDelta, Timelike};
+use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
+use crate::manager_nordpool::NordPool;
+use crate::manager_smhi::SMHI;
 use crate::production::PVProduction;
+use crate::{retry, wrapper, LAT, LONG};
 
 /// Time needed to fully charge batteries from SoC 10% to SoC 100%
 const CHARGE_LEN: u8 = 3;
@@ -498,4 +507,116 @@ impl Schedule {
         filtered_blocks
     }
 
+}
+
+/// Creates a new schedule including updating charge levels
+///
+/// # Arguments
+///
+/// * 'nordpool' - reference to a NordPool struct
+/// * 'SMHI' - reference to a SMHI struct
+/// * 'future' - optional future in days, i.e. if set to 1 it will create a schedule for tomorrow
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, future: Option<usize>) -> Result<Schedule, String> {
+    let mut d = 0;
+    if let Some(f) = future { d = f as i64 }
+    let forecast = retry!(||smhi.get_forecast(Local::now().add(TimeDelta::days(d))))?;
+    let production = PVProduction::new(&forecast, LAT, LONG);
+    let consumption = Consumption::new(&forecast);
+    let tariffs = retry!(||nordpool.get_tariffs(Local::now().add(TimeDelta::days(d))))?;
+    let mut schedule = Schedule::from_tariffs(&tariffs).update_status();
+    schedule.update_charge_levels(&production, &consumption);
+
+    Ok(schedule)
+}
+
+/// Updates an existing schedule with updated charge levels
+///
+/// # Arguments
+///
+/// * 'schedule' - a mutable reference to an existing schedule to be updated
+/// * 'smhi' - reference to a SMHI struct
+pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &SMHI) {
+    match retry!(||smhi.get_forecast(Local::now())) {
+        Ok(forecast) => {
+            let production = PVProduction::new(&forecast, LAT, LONG);
+            let consumption = Consumption::new(&forecast);
+            schedule.update_charge_levels(&production, &consumption);
+        },
+        Err(e) => {
+            eprintln!("Error updating schedule for block: {}", e);
+            eprintln!("This is recoverable, it only affects charge levels")
+        }
+    }
+}
+
+/// Saves schedule to file as json
+/// The filename gives at most one unique file per hour
+///
+/// # Arguments
+///
+/// * 'schedule' - the schedule to save
+/// * 'backup_dir' - the directory to save the file to
+pub fn save_schedule(schedule: &Schedule, backup_dir: &str) {
+    let err: String;
+    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d_%H"));
+    match serde_json::to_string(&schedule) {
+        Ok(json) => {
+            match fs::write(file_path, json) {
+                Ok(_) => { return },
+                Err(e) => { err = e.to_string() }
+            }
+        },
+        Err(e) => { err = e.to_string() }
+    }
+    eprintln!("Error writing schedule to file: {}", err);
+    eprintln!("This is recoverable")
+}
+
+/// Loads schedule from json on file
+///
+/// This is mostly to avoid re-executing an already started block, hence it will just find
+/// the latest saved schedule for the current day
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+pub fn load_schedule(backup_dir: &str) -> Result<Option<Schedule>, String> {
+    let mut entries: Vec<String> = Vec::new();
+    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d*"));
+    for entry in glob(&file_path)
+        .map_err(|e| format!("Error searching directory: {}", e.to_string()))? {
+        match entry {
+            Ok(path) => {
+                if path.is_file() {
+                    if let Some(os_path) = path.to_str() {
+                        entries.push(os_path.to_string());
+                    }
+                }
+            },
+            Err(e) => {
+                return Err(format!("Error reading directory entry: {}", e.to_string()));
+            }
+        }
+    }
+
+    entries.sort();
+
+    if entries.len() > 0 {
+        match File::open(&entries[entries.len() - 1]) {
+            Ok(mut file) => {
+                let mut contents = String::new();
+                match file.read_to_string(&mut contents).map_err(|e| e.to_string()) {
+                    Ok(_) => {
+                        let schedule: Schedule = serde_json::from_str(&contents)
+                            .map_err(|e| format!("Error while parsing json to Schedule: {}", e.to_string()))?;
+                        Ok(Some(schedule))
+                    },
+                    Err(e) => { Err(format!("Error while reading backup file: {}", e.to_string())) }
+                }
+            },
+            Err(e) => { Err(format!("Error while open schedule file: {}", e.to_string())) }
+        }
+    } else {
+        Ok(None)
+    }
 }
