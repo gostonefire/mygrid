@@ -12,14 +12,22 @@ const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
 
 pub struct Fox {
     api_key: String,
+    sn: String,
     client: Client,
 }
 
 impl Fox {
-    pub fn new(api_key: String) -> Self {
+    /// Returns a new instance of the Fox struct
+    ///
+    /// # Arguments
+    ///
+    /// * 'api_key' - API key for communication with Fox Cloud
+    /// * 'sn' - the serial number of the inverter to manage
+    pub fn new(api_key: String, sn: String) -> Self {
         let client = Client::new();
         Self {
             api_key,
+            sn,
             client,
         }
     }
@@ -30,11 +38,10 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_current_soc(&self, sn: &str) -> Result<u8, String> {
+    pub fn get_current_soc(&self) -> Result<u8, String> {
         let path = "/op/v0/device/real/query";
 
-        let req = RequestCurrentSoc { sn: sn.to_string(), variables: vec!["SoC".to_string()] };
+        let req = RequestCurrentSoc { sn: self.sn.clone(), variables: vec!["SoC".to_string()] };
         let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
         let json = self.post_request(&path, req_json)?;
@@ -51,11 +58,10 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_min_soc_on_grid(&self, sn: &str) -> Result<u8, String> {
+    pub fn get_min_soc_on_grid(&self) -> Result<u8, String> {
         let path = "/op/v0/device/setting/get";
 
-        let req = RequestSoc { sn: sn.to_string(), key: "MinSocOnGrid".to_string() };
+        let req = RequestSoc { sn: self.sn.clone(), key: "MinSocOnGrid".to_string() };
         let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
         let json = self.post_request(&path, req_json)?;
@@ -72,12 +78,11 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
     /// * 'soc' - the new min soc on grid value (10 - 100)
-    pub fn set_min_soc_on_grid(&self, sn: &str, soc: u8) -> Result<(), String> {
+    pub fn set_min_soc_on_grid(&self, soc: u8) -> Result<(), String> {
         let path = "/op/v0/device/setting/set";
 
-        let req = SetSoc { sn: sn.to_string(), key: "MinSocOnGrid".to_string(), value: soc.to_string() };
+        let req = SetSoc { sn: self.sn.clone(), key: "MinSocOnGrid".to_string(), value: soc.to_string() };
         let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
         let _ = self.post_request(&path, req_json)?;
@@ -113,12 +118,11 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
     /// * 'soc' - the new min soc on grid value (10 - 100)
-    pub fn set_max_soc(&self, sn: &str, soc: u8) -> Result<(), String> {
+    pub fn set_max_soc(&self, soc: u8) -> Result<(), String> {
         let path = "/op/v0/device/setting/set";
 
-        let req = SetSoc { sn: sn.to_string(), key: "MaxSoc".to_string(), value: soc.to_string() };
+        let req = SetSoc { sn: self.sn.clone(), key: "MaxSoc".to_string(), value: soc.to_string() };
         let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
         let _ = self.post_request(&path, req_json)?;
@@ -132,12 +136,9 @@ impl Fox {
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20setting20of20battery20charging20time0a3ca20id3dget20the20setting20of20battery20charging20time4303e203ca3e
     ///
-    /// # Arguments
-    ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_battery_charging_time_schedule(&self, sn: &str) -> Result<ChargingTimeSchedule, String> {
+    pub fn get_battery_charging_time_schedule(&self) -> Result<ChargingTimeSchedule, String> {
         let path = "/op/v0/device/battery/forceChargeTime/get";
-        let json = self.get_request(&path,vec![("sn", sn)])?;
+        let json = self.get_request(&path,vec![("sn", self.sn.clone())])?;
 
         let fox_data: ChargingTimeResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
@@ -153,7 +154,6 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
     /// * 'enable_1' - whether schedule 1 shall be enabled
     /// * 'start_hour_1' - start hour of schedule 1
     /// * 'start_minute_1' - start minute of schedule 1
@@ -166,14 +166,12 @@ impl Fox {
     /// * 'end_minute_2' - end minute of schedule 2
     pub fn set_battery_charging_time_schedule(
         &self,
-        sn: &str,
         enable_1: bool, start_hour_1: u8, start_minute_1: u8, end_hour_1: u8, end_minute_1: u8,
         enable_2: bool, start_hour_2: u8, start_minute_2: u8, end_hour_2: u8, end_minute_2: u8,
     ) -> Result<(), String> {
         let path = "/op/v0/device/battery/forceChargeTime/set";
 
-        let schedule = Self::build_charge_time_schedule(
-            sn,
+        let schedule = self.build_charge_time_schedule(
             enable_1, start_hour_1, start_minute_1, end_hour_1, end_minute_1,
             enable_2, start_hour_2, start_minute_2, end_hour_2, end_minute_2,
         )?;
@@ -186,12 +184,8 @@ impl Fox {
 
     /// Disables any current ongoing charging schedule in the inverter
     ///
-    /// # Arguments
-    ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn disable_charge_schedule(&self, sn: &str) -> Result<(), String> {
+    pub fn disable_charge_schedule(&self) -> Result<(), String> {
         self.set_battery_charging_time_schedule(
-            sn,
             false, 0, 0, 0, 0,
             false, 0, 0, 0, 0,
         )
@@ -201,13 +195,10 @@ impl Fox {
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
     ///
-    /// # Arguments
-    ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_device_time(&self, sn: &str) -> Result<NaiveDateTime, String> {
+    pub fn get_device_time(&self) -> Result<NaiveDateTime, String> {
         let path = "/op/v0/device/time/get";
 
-        let req = RequestTime { sn: sn.to_string() };
+        let req = RequestTime { sn: self.sn.clone() };
         let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
         let json = self.post_request(&path, req_json)?;
@@ -225,13 +216,12 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'sn' - the serial number of the inverter
     /// * 'date_time - date and time as a DateTime<Local>, i.e. OS local time
-    pub fn set_device_time(&self, sn: &str, date_time: NaiveDateTime) -> Result<(), String> {
+    pub fn set_device_time(&self, date_time: NaiveDateTime) -> Result<(), String> {
         let path = "/op/v0/device/time/set";
 
         let req = DeviceTime {
-            sn: sn.to_string(),
+            sn: self.sn.clone(),
             year: date_time.year().to_string(),
             month: date_time.month().to_string(),
             day: date_time.day().to_string(),
@@ -367,7 +357,7 @@ impl Fox {
     /// * 'end_hour_2' - end hour of schedule 2
     /// * 'end_minute_2' - end minute of schedule 2
     fn build_charge_time_schedule(
-        sn: &str,
+        &self,
         mut enable_1: bool, mut start_hour_1: u8, mut start_minute_1: u8, mut end_hour_1: u8, mut end_minute_1: u8,
         mut enable_2: bool, mut start_hour_2: u8, mut start_minute_2: u8, mut end_hour_2: u8, mut end_minute_2: u8,
     ) -> Result<ChargingTimeSchedule, String> {
@@ -419,7 +409,7 @@ impl Fox {
 
         // All checks seem fine, return schedule struct
         Ok(ChargingTimeSchedule {
-            sn: sn.to_string(),
+            sn: self.sn.clone(),
             enable_1,
             start_time_1: ChargingTime { hour: start_hour_1, minute: start_minute_1 },
             end_time_1: ChargingTime { hour: end_hour_1, minute: end_minute_1 },
