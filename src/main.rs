@@ -84,9 +84,9 @@ fn main() {
     println!("================================================================================");
 
 
-    // Main loop that runs once a minute
+    // Main loop that runs once every ten seconds
     let mut local_now: DateTime<Local>;
-    let mut day_of_year = Local::now().ordinal0();
+    let mut day_of_year = 400u32;
     loop {
         thread::sleep(Duration::from_secs(10));
         local_now = Local::now();
