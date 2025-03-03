@@ -12,7 +12,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
 
     // Main loop that runs once every ten seconds
     let mut local_now: DateTime<Local>;
-    let mut day_of_year = 400u32; // the 400 is arbitrary, just need to be outside 0-366
+    let mut day_of_year = schedule.date.ordinal0();
     loop {
         thread::sleep(Duration::from_secs(10));
         local_now = Local::now();

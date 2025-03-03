@@ -5,7 +5,7 @@ use std::io::Read;
 use std::ops::Add;
 use std::thread;
 use std::time::Duration;
-use chrono::{Local, TimeDelta, Timelike};
+use chrono::{DateTime, Local, TimeDelta, Timelike};
 use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
@@ -91,6 +91,7 @@ impl fmt::Display for Block {
 /// Struct representing one day's block schedule
 #[derive(Serialize, Deserialize)]
 pub struct Schedule {
+    pub date: DateTime<Local>,
     pub blocks: Vec<Block>,
 }
 
@@ -108,7 +109,7 @@ impl Schedule {
     ///
     /// * 'tariffs' - tariffs from NordPool for the day to create schedule for
     pub fn from_tariffs(tariffs: &Vec<f64>) -> Schedule {
-        let mut schedule = Schedule { blocks: Vec::new() };
+        let mut schedule = Schedule { date: Local::now(), blocks: Vec::new() };
         let segments: [(u8,u8);3] = [(0,8 - CHARGE_LEN), (8, 16 - CHARGE_LEN), (16, 24 - CHARGE_LEN)];
 
         // Find the best charge block with following use block(s) where mean price for a use block is
@@ -339,7 +340,7 @@ impl Schedule {
     /// * 'schedule' - the schedule to fill hold blocks to
     /// * 'tariffs' - used to fill in mean price also for hold blocks
     fn add_hold_blocks(schedule: Schedule, tariffs: &Vec<f64>) -> Schedule {
-        let mut new_schedule = Schedule { blocks: Vec::new() };
+        let mut new_schedule = Schedule { date: schedule.date, blocks: Vec::new() };
         if schedule.blocks.is_empty() {
             new_schedule.blocks.push(Self::create_hold_block(tariffs, 0, 23));
             return new_schedule;
