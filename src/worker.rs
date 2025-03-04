@@ -5,10 +5,11 @@ use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper};
+use crate::errors::{MyGridWorkerError};
 use crate::scheduling::{create_new_schedule, save_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
 pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, backup_dir: String)
-    -> Result<(), String> {
+    -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
     let mut local_now: DateTime<Local>;
@@ -19,16 +20,9 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
 
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
-            check_inverter_local_time(&fox);
-            match create_new_schedule(&nordpool, &smhi, None) {
-                Ok(s) => {
-                    schedule = s;
-                    day_of_year = local_now.ordinal0();
-                },
-                Err(e) => {
-                    eprintln!("Error creating new schedule for day 0: {}", e);
-                }
-            }
+            check_inverter_local_time(&fox)?;
+            schedule = create_new_schedule(&nordpool, &smhi, None)?;
+            day_of_year = local_now.ordinal0();
         }
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
@@ -38,15 +32,9 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
         // on grid to max soc (i.e. we set it to Hold) and also set the block status to Full.
         if let Some(b) = schedule.get_current_started_charge(local_now.hour() as u8) {
             if local_now.minute() % 5 == 0 {
-                match set_full_if_done(&fox, schedule.blocks[b].max_soc) {
-                    Ok(Some(status)) => {
-                        schedule.update_block_status(b, status)?;
-                        save_schedule(&schedule, &backup_dir);
-                    }
-                    Err(e) => {
-                        print_error(local_now, e, None);
-                    }
-                    _ => ()
+                if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
+                    schedule.update_block_status(b, status)?;
+                    save_schedule(&schedule, &backup_dir)?;
                 }
             }
         }
@@ -59,40 +47,30 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
                 BlockType::Charge => {
                     // To ensure we have the best charge level estimate we update the schedule
                     // given the latest forecast from SMHI.
-                    update_existing_schedule(&mut schedule, &smhi);
+                    update_existing_schedule(&mut schedule, &smhi)?;
                     block = schedule.get_block_clone(b).unwrap();
 
-                    status = match set_charge(&fox, &block) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            print_error(local_now, e, Some(&block));
-                            Status::Error
-                        }
-                    };
+                    status = set_charge(&fox, &block).map_err(|e| {
+                        MyGridWorkerError::new(e.to_string(), &block)
+                    })?;
                 },
+
                 BlockType::Hold => {
-                    status = match set_hold(&fox, block.max_min_soc) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            print_error(local_now, e, Some(&block));
-                            Status::Error
-                        }
-                    };
+                    status = set_hold(&fox, block.max_min_soc).map_err(|e| {
+                        MyGridWorkerError::new(e.to_string(), &block)
+                    })?;
                 },
+
                 BlockType::Use => {
-                    status = match set_use(&fox) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            print_error(local_now, e, Some(&block));
-                            Status::Error
-                        }
-                    };
+                    status = set_use(&fox).map_err(|e| {
+                        MyGridWorkerError::new(e.to_string(), &block)
+                    })?;
                 },
             }
             schedule.update_block_status(b, status)?;
 
             // Save current schedule version
-            save_schedule(&schedule, &backup_dir);
+            save_schedule(&schedule, &backup_dir)?;
             for s in &schedule.blocks {
                 println!("{}", s);
             }
@@ -101,49 +79,23 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
     }
 }
 
-/// Prints error message for block starts
-///
-/// # Arguments
-///
-/// * 'start_time' - time when block started to be set
-/// * 'error' - error reported from block start function
-/// * 'block' - block that caused the error
-fn print_error(start_time: DateTime<Local>, error: String, block: Option<&Block>) {
-    let start_time = format!("{}", start_time.format("%Y-%m-%d %H:%M:%S"));
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    eprintln!("================================================================================");
-    eprintln!("Start Time: {}, Report Time: {}", start_time, report_time);
-    eprintln!("Unrecoverable error while setting block: {}", error);
-    eprintln!("Block:\n{}", block.map_or_else(|| "None".to_string(), |b| b.to_string()));
-}
-
 /// checks the local clock in the inverter and sets it correctly if it has drifted more than a minute
 ///
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-fn check_inverter_local_time(fox: &Fox) {
-    let err: String;
-    match retry!(||fox.get_device_time()) {
-        Ok(dt) => {
-            let now = Local::now().naive_local();
-            let delta = (now - dt).abs();
+fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
+    let dt = retry!(||fox.get_device_time())?;
+    let now = Local::now().naive_local();
+    let delta = (now - dt).abs();
 
-            if delta > chrono::Duration::minutes(1) {
-                match fox.set_device_time(now) {
-                    Ok(_) => { return },
-                    Err(e) => { err = e }
-                }
-            } else {
-                return;
-            }
-        },
-        Err(e) => { err = e }
+    if delta > chrono::Duration::minutes(1) {
+        let _ = fox.set_device_time(now)?;
     }
-    eprintln!("Error getting inverter device time: {}", err);
-    eprintln!("This is recoverable unless it repeats to many times")
 
+    Ok(())
 }
+
 /// Sets a charge block in the inverter
 ///
 /// The logic is quite simple:
@@ -157,7 +109,7 @@ fn check_inverter_local_time(fox: &Fox) {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'block' - the configuration to use
-fn set_charge(fox: &Fox, block: &Block) -> Result<Status, String> {
+fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
 
@@ -189,7 +141,7 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, String> {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'max_soc' - max soc
-fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, String> {
+fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWorkerError> {
     let soc= retry!(||fox.get_current_soc())?;
     if soc >= max_soc {
         let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
@@ -223,7 +175,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, String> {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'max_min_soc' - max min soc allowed for the block
-fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, String> {
+fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting hold block",report_time);
 
@@ -247,7 +199,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, String> {
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-fn set_use(fox: &Fox) -> Result<Status, String> {
+fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting use block",report_time);
 

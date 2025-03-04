@@ -1,7 +1,32 @@
+use std::fmt;
 use chrono::{DateTime, Local, Timelike};
 use reqwest::blocking::Client;
-use reqwest::StatusCode;
+use reqwest::{StatusCode};
 use crate::models::smhi_forecast::{FullForecast, TimeValues};
+
+pub enum SMHIError {
+    SMHI(String),
+    Document(String),
+}
+
+impl fmt::Display for SMHIError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SMHIError::SMHI(e) => write!(f, "SMHIError::SMHI: {}", e),
+            SMHIError::Document(e) => write!(f, "SMHIError::Document: {}", e),
+        }
+    }
+}
+impl From<reqwest::Error> for SMHIError {
+    fn from(e: reqwest::Error) -> Self {
+        SMHIError::SMHI(e.to_string())
+    }
+}
+impl From<serde_json::Error> for SMHIError {
+    fn from(e: serde_json::Error) -> Self {
+        SMHIError::Document(e.to_string())
+    }
+}
 
 /// Struct for managing whether forecasts produced by SMHI
 pub struct SMHI {
@@ -38,7 +63,7 @@ impl SMHI {
     /// # Arguments
     ///
     /// * 'date_time' - the date to get a forecast for
-    pub fn get_forecast(&self, date_time: DateTime<Local>) -> Result<[TimeValues;24], String> {
+    pub fn get_forecast(&self, date_time: DateTime<Local>) -> Result<[TimeValues;24], SMHIError> {
         let smhi_domain = "https://opendata-download-metfcst.smhi.se";
         let base_url = "/api/category/pmp3g/version/2/geotype/point";
         let url = format!("{}{}/lon/{:0.4}/lat/{:0.4}/data.json",
@@ -48,15 +73,14 @@ impl SMHI {
 
         let res = self.client
             .get(url)
-            .send()
-            .map_err(|e| format!("Get request error: {}", e.to_string()))?;
+            .send()?;
 
         if res.status() != StatusCode::OK {
-            return Err(format!("Http error: {}", res.status().to_string()))
+            return Err(SMHIError::SMHI(res.status().to_string()));
         }
 
-        let json = res.text().map_err(|e| e.to_string())?;
-        let tmp_forecast: FullForecast = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let json = res.text()?;
+        let tmp_forecast: FullForecast = serde_json::from_str(&json)?;
 
         let mut forecast: Vec<TimeValues> = Vec::with_capacity(24);
 
@@ -80,7 +104,7 @@ impl SMHI {
         }
 
         if forecast.len() == 0 {
-            Err(format!("No forecast found for {}", date_time.date_naive()))
+            Err(SMHIError::SMHI(format!("No forecast found for {}", date_time.date_naive())))
         } else {
             Ok(SMHI::fill_in_gaps(&forecast))
         }

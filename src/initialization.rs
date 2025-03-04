@@ -1,5 +1,6 @@
 use std::env;
 use crate::{LAT, LONG};
+use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
@@ -7,19 +8,15 @@ use crate::scheduling::{create_new_schedule, load_schedule, Schedule};
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), String> {
-    let api_key = match env::var("FOX_ESS_API_KEY") {
-        Ok(v) => v,
-        Err(e) => { return Err(format!("Error getting API key: {}", e)); }
-    };
-    let inverter_sn = match env::var("FOX_ESS_INVERTER_SN") {
-        Ok(v) => v,
-        Err(e) => { return Err(format!("Error getting inverter SN: {}", e)); }
-    };
-    let backup_dir = match env::var("BACKUP_DIR") {
-        Ok(v) => v,
-        Err(e) => { return Err(format!("Error getting backup directory: {}", e)); }
-    };
+pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError> {
+    let api_key = env::var("FOX_ESS_API_KEY")
+        .map_err(|e|MyGridInitError(format!("getting API key: {}", e)))?;
+
+    let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
+        .map_err(|e|MyGridInitError(format!("getting inverter_sn: {}", e)))?;
+
+    let backup_dir = env::var("BACKUP_DIR")
+        .map_err(|e|MyGridInitError(format!("getting backup dir: {}", e)))?;
 
     // Instantiate structs
     let fox = Fox::new(api_key, inverter_sn);
@@ -27,11 +24,8 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), String> {
     let smhi = SMHI::new(LAT, LONG);
 
     // Create a first base schedule given only tariffs, charge level will later be updated
-    let mut schedule: Schedule;
-    match create_new_schedule(&nordpool, &smhi, None) {
-        Ok(s) => schedule = s,
-        Err(e) => { return Err(format!("Error creating new schedule during init: {}", e)); }
-    }
+    let mut schedule = create_new_schedule(&nordpool, &smhi, None)?;
+
     for s in &schedule.blocks {
         println!("{}", s);
     }
@@ -39,13 +33,8 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), String> {
 
     // Check if we have an existing schedule for the day that then may be updated with
     // already started/running blocks
-    match load_schedule(&backup_dir) {
-        Ok(option) => {
-            if let Some(s) = option {
-                schedule = s;
-            };
-        },
-        Err(e) => { return Err(format!("Error loading backup schedule: {}", e)); }
+    if let Some(s) = load_schedule(&backup_dir)? {
+        schedule = s;
     }
     for s in &schedule.blocks {
         println!("{}", s);

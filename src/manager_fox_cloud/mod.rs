@@ -1,14 +1,55 @@
+use std::fmt;
+use std::fmt::Formatter;
 use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
-use reqwest::StatusCode;
+use reqwest::{StatusCode};
 use serde::{Deserialize, Serialize};
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
+
+pub enum FoxError {
+    FoxCloud(String),
+    Document(String),
+    Other(String),
+}
+impl fmt::Display for FoxError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            FoxError::FoxCloud(e) => write!(f, "FoxError::FoxCloud: {}", e),
+            FoxError::Document(e) => write!(f, "FoxError::Document: {}", e),
+            FoxError::Other(e) => write!(f, "FoxError::Schedule: {}", e),
+        }
+    }
+}
+
+impl From<String> for FoxError {
+    fn from(e: String) -> Self {
+        FoxError::Other(e)
+    }
+}
+
+impl From<&str> for FoxError {
+    fn from(e: &str) -> Self {
+        FoxError::Other(e.to_string())
+    }
+}
+
+impl From<reqwest::Error> for FoxError {
+    fn from(e: reqwest::Error) -> FoxError {
+        FoxError::FoxCloud(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for FoxError {
+    fn from(e: serde_json::Error) -> FoxError {
+        FoxError::Document(e.to_string())
+    }
+}
 
 pub struct Fox {
     api_key: String,
@@ -38,15 +79,17 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    pub fn get_current_soc(&self) -> Result<u8, String> {
+    pub fn get_current_soc(&self) -> Result<u8, FoxError> {
         let path = "/op/v0/device/real/query";
 
         let req = RequestCurrentSoc { sn: self.sn.clone(), variables: vec!["SoC".to_string()] };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+//        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&req)?;
 
         let json = self.post_request(&path, req_json)?;
 
-        let fox_data: SocCurrentResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+//        let fox_data: SocCurrentResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let fox_data: SocCurrentResult = serde_json::from_str(&json)?;
 
         Ok(fox_data.result[0].datas[0].value.round() as u8)
     }
@@ -79,11 +122,11 @@ impl Fox {
     /// # Arguments
     ///
     /// * 'soc' - the new min soc on grid value (10 - 100)
-    pub fn set_min_soc_on_grid(&self, soc: u8) -> Result<(), String> {
+    pub fn set_min_soc_on_grid(&self, soc: u8) -> Result<(), FoxError> {
         let path = "/op/v0/device/setting/set";
 
         let req = SetSoc { sn: self.sn.clone(), key: "MinSocOnGrid".to_string(), value: soc.to_string() };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&req)?;
 
         let _ = self.post_request(&path, req_json)?;
 
@@ -119,11 +162,11 @@ impl Fox {
     /// # Arguments
     ///
     /// * 'soc' - the new min soc on grid value (10 - 100)
-    pub fn set_max_soc(&self, soc: u8) -> Result<(), String> {
+    pub fn set_max_soc(&self, soc: u8) -> Result<(), FoxError> {
         let path = "/op/v0/device/setting/set";
 
         let req = SetSoc { sn: self.sn.clone(), key: "MaxSoc".to_string(), value: soc.to_string() };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&req)?;
 
         let _ = self.post_request(&path, req_json)?;
 
@@ -168,14 +211,14 @@ impl Fox {
         &self,
         enable_1: bool, start_hour_1: u8, start_minute_1: u8, end_hour_1: u8, end_minute_1: u8,
         enable_2: bool, start_hour_2: u8, start_minute_2: u8, end_hour_2: u8, end_minute_2: u8,
-    ) -> Result<(), String> {
+    ) -> Result<(), FoxError> {
         let path = "/op/v0/device/battery/forceChargeTime/set";
 
         let schedule = self.build_charge_time_schedule(
             enable_1, start_hour_1, start_minute_1, end_hour_1, end_minute_1,
             enable_2, start_hour_2, start_minute_2, end_hour_2, end_minute_2,
         )?;
-        let req_json = serde_json::to_string(&schedule).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&schedule)?;
 
         let _ = self.post_request(&path, req_json)?;
 
@@ -184,7 +227,7 @@ impl Fox {
 
     /// Disables any current ongoing charging schedule in the inverter
     ///
-    pub fn disable_charge_schedule(&self) -> Result<(), String> {
+    pub fn disable_charge_schedule(&self) -> Result<(), FoxError> {
         self.set_battery_charging_time_schedule(
             false, 0, 0, 0, 0,
             false, 0, 0, 0, 0,
@@ -195,15 +238,15 @@ impl Fox {
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
     ///
-    pub fn get_device_time(&self) -> Result<NaiveDateTime, String> {
+    pub fn get_device_time(&self) -> Result<NaiveDateTime, FoxError> {
         let path = "/op/v0/device/time/get";
 
         let req = RequestTime { sn: self.sn.clone() };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&req)?;
 
         let json = self.post_request(&path, req_json)?;
 
-        let fox_data: DeviceTimeResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let fox_data: DeviceTimeResult = serde_json::from_str(&json)?;
 
         let device_time = Fox::device_time_to_date_time(&fox_data.result)?;
 
@@ -216,8 +259,8 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'date_time - date and time as a DateTime<Local>, i.e. OS local time
-    pub fn set_device_time(&self, date_time: NaiveDateTime) -> Result<(), String> {
+    /// * 'date_time' - date and time as a DateTime<Local>, i.e. OS local time
+    pub fn set_device_time(&self, date_time: NaiveDateTime) -> Result<(), FoxError> {
         let path = "/op/v0/device/time/set";
 
         let req = DeviceTime {
@@ -229,7 +272,7 @@ impl Fox {
             minute: date_time.minute().to_string(),
             second: date_time.second().to_string(),
         };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let req_json = serde_json::to_string(&req)?;
 
         let json = self.post_request(&path, req_json)?;
 
@@ -272,7 +315,7 @@ impl Fox {
     ///
     /// * path - the API path excluding the domain
     /// * body - a string containing the payload in json format
-    fn post_request(&self, path: &str, body: String) -> Result<String, String> {
+    fn post_request(&self, path: &str, body: String) -> Result<String, FoxError> {
         let url = format!("{}{}", REQUEST_DOMAIN, path);
         let mut header = self.generate_header(&path);
         header.append("Content-Type", HeaderValue::from_str("application/json").unwrap());
@@ -281,8 +324,9 @@ impl Fox {
             .post(url)
             .headers(header)
             .body(body)
-            .send()
-            .map_err(|e| format!("Post request error: {}", e.to_string()))?;
+            .send()?;
+
+            //.map_err(|e| format!("Post request error: {}", e.to_string()))?;
 
         let json = Fox::get_check_response(res)?;
 
@@ -319,15 +363,18 @@ impl Fox {
     /// # Arguments
     ///
     /// * 'response' - the response object from a Fox ESS request
-    fn get_check_response(response: Response) -> Result<String, String> {
+    fn get_check_response(response: Response) -> Result<String, FoxError> {
         if response.status() != StatusCode::OK {
-            return Err(format!("Http error: {}", response.status().to_string()))
+            return Err(FoxError::FoxCloud(response.status().to_string()));
+            //return Err(format!("Http error: {}", response.status().to_string()))
         }
 
-        let json = response.text().map_err(|e| e.to_string())?;
-        let fox_res: FoxResponse = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+//        let json = response.text().map_err(|e| e.to_string())?;
+        let json = response.text()?;
+//        let fox_res: FoxResponse = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let fox_res: FoxResponse = serde_json::from_str(&json)?;
         if fox_res.errno != 0 {
-            return Err(format!("Err from Fox: {} - {}", fox_res.errno, fox_res.msg))
+            return Err(FoxError::FoxCloud(format!("errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
         }
 
         Ok(json)
@@ -360,15 +407,17 @@ impl Fox {
         &self,
         mut enable_1: bool, mut start_hour_1: u8, mut start_minute_1: u8, mut end_hour_1: u8, mut end_minute_1: u8,
         mut enable_2: bool, mut start_hour_2: u8, mut start_minute_2: u8, mut end_hour_2: u8, mut end_minute_2: u8,
-    ) -> Result<ChargingTimeSchedule, String> {
+    ) -> Result<ChargingTimeSchedule, FoxError> {
 
         // Check schedule 1 for inconsistencies
-        let start_1 = NaiveTime::from_hms_opt(start_hour_1 as u32, start_minute_1 as u32, 0).ok_or("Schedule 1, start time error".to_string())?;
-        let end_1 = NaiveTime::from_hms_opt(end_hour_1 as u32, end_minute_1 as u32, 0).ok_or("Schedule 1, end time error".to_string())?;
+        let start_1 = NaiveTime::from_hms_opt(start_hour_1 as u32, start_minute_1 as u32, 0)
+            .ok_or(FoxError::from("Schedule 1, start time error"))?;
+        let end_1 = NaiveTime::from_hms_opt(end_hour_1 as u32, end_minute_1 as u32, 0)
+            .ok_or(FoxError::from("Schedule 1, end time error"))?;
         let dur_1 = end_1 - start_1;
 
         if dur_1 < TimeDelta::new(0, 0).unwrap() {
-            return Err("Schedule 1, start time after end time".to_string());
+            return Err(FoxError::from("Schedule 1, start time after end time"));
         }
 
         if !enable_1 || dur_1 == TimeDelta::new(0, 0).unwrap() {
@@ -380,12 +429,14 @@ impl Fox {
         }
 
         // Check schedule 2 for inconsistencies
-        let start_2 = NaiveTime::from_hms_opt(start_hour_2 as u32, start_minute_2 as u32, 0).ok_or("Schedule 2, start time error".to_string())?;
-        let end_2 = NaiveTime::from_hms_opt(end_hour_2 as u32, end_minute_2 as u32, 0).ok_or("Schedule 2, end time error".to_string())?;
+        let start_2 = NaiveTime::from_hms_opt(start_hour_2 as u32, start_minute_2 as u32, 0)
+            .ok_or(FoxError::from("Schedule 2, start time error"))?;
+        let end_2 = NaiveTime::from_hms_opt(end_hour_2 as u32, end_minute_2 as u32, 0)
+            .ok_or(FoxError::from("Schedule 2, end time error"))?;
         let dur_2 = end_2 - start_2;
 
         if dur_2 < TimeDelta::new(0, 0).unwrap() {
-            return Err("Schedule 2, start time after end time".to_string());
+            return Err(FoxError::from("Schedule 2, start time after end time"));
         }
 
         if !enable_2 || dur_2 <= TimeDelta::new(0, 0).unwrap() {
@@ -400,10 +451,10 @@ impl Fox {
         // Check if schedules are overlapping
         if enable_1 && enable_2 {
             if start_2 >= start_1 && start_2 <= start_1 + dur_1 {
-                return Err("Overlapping schedules".to_string());
+                return Err(FoxError::from("Overlapping schedules"));
             }
             if end_2 >= start_1 && end_2 <= start_1 + dur_1 {
-                return Err("Overlapping schedules".to_string());
+                return Err(FoxError::from("Overlapping schedules"));
             }
         }
 
@@ -427,7 +478,7 @@ impl Fox {
     /// # Arguments
     ///
     /// * 'device_time' - the DeviceTime struct from the inverter response
-    fn device_time_to_date_time(device_time: &DeviceTime) -> Result<NaiveDateTime, String> {
+    fn device_time_to_date_time(device_time: &DeviceTime) -> Result<NaiveDateTime, FoxError> {
         let dt_string = format!("{}-{}-{} {}:{}:{}",
                                 device_time.year,
                                 device_time.month,

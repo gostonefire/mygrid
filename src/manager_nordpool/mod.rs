@@ -1,7 +1,38 @@
+use std::fmt;
+use std::fmt::Formatter;
 use chrono::{DateTime, Local, Timelike};
 use reqwest::blocking::{Client};
-use reqwest::StatusCode;
+use reqwest::{StatusCode};
 use crate::models::nordpool_tariffs::Tariffs;
+
+pub enum NordPoolError {
+    NordPool(String),
+    Document(String),
+}
+
+impl fmt::Display for NordPoolError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            NordPoolError::NordPool(e) => write!(f, "NordPoolError::NordPool: {}", e),
+            NordPoolError::Document(e) => write!(f, "NordPoolError::Document: {}", e),
+        }
+    }
+}
+impl From<&str> for NordPoolError {
+    fn from(e: &str) -> Self {
+        NordPoolError::NordPool(e.to_string())
+    }
+}
+impl From<reqwest::Error> for NordPoolError {
+    fn from(e: reqwest::Error) -> Self {
+        NordPoolError::NordPool(e.to_string())
+    }
+}
+impl From<serde_json::Error> for NordPoolError {
+    fn from(e: serde_json::Error) -> Self {
+        NordPoolError::Document(e.to_string())
+    }
+}
 
 pub struct NordPool {
     client: Client,
@@ -18,7 +49,7 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'date_time' - the date to retrieve prices for
-    pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<f64>, String> {
+    pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<f64>, NordPoolError> {
         let url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices";
         let date = format!("{}", date_time.format("%Y-%m-%d"));
         let query = vec![
@@ -31,16 +62,15 @@ impl NordPool {
         let res = self.client
             .get(url)
             .query(&query)
-            .send()
-            .map_err(|e| format!("Get request error: {}", e.to_string()))?;
+            .send()?;
 
         if res.status() != StatusCode::OK {
-            return Err(format!("Http error: {}", res.status().to_string()))
+            return Err(NordPoolError::NordPool(res.status().to_string()));
         }
 
-        let json = res.text().map_err(|e| e.to_string())?;
+        let json = res.text()?;
 
-        let tariffs: Tariffs = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let tariffs: Tariffs = serde_json::from_str(&json)?;
 
         NordPool::tariffs_to_vec(&tariffs)
     }
@@ -50,9 +80,9 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'tariffs' - the struct containing prices
-    fn tariffs_to_vec(tariffs: &Tariffs) -> Result<Vec<f64>, String> {
+    fn tariffs_to_vec(tariffs: &Tariffs) -> Result<Vec<f64>, NordPoolError> {
         if tariffs.multi_area_entries.len() != 24 {
-            return Err("number of day tariffs not equal to 24".to_string());
+            return Err(NordPoolError::from("number of day tariffs not equal to 24"))
         }
 
         let mut result: Vec<f64> = vec![0.0;24];
