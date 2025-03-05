@@ -575,8 +575,7 @@ impl Schedule {
 /// * 'SMHI' - reference to a SMHI struct
 /// * 'future' - optional future in days, i.e. if set to 1 it will create a schedule for tomorrow
 pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, future: Option<usize>) -> Result<Schedule, SchedulingError> {
-    let mut d = 0;
-    if let Some(f) = future { d = f as i64 }
+    let d = future.map_or(0i64, |f| f as i64);
     let forecast = retry!(||smhi.get_forecast(Local::now().add(TimeDelta::days(d))))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
