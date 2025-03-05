@@ -42,7 +42,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
     if let Some(s) = load_schedule(&backup_dir)? {
         schedule = s;
     }
-    print_schedule(&schedule, "Startup");
+    print_schedule(&schedule, "From Backup");
 
     Ok((fox, nordpool, smhi, schedule, backup_dir))
 }

@@ -22,7 +22,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
         // Create and display an estimated schedule for tomorrow
         if local_now.hour() >= 15 && day_ahead_schedule.date.day() != local_now.day() {
             day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, &smhi, Some(1)) {
-                print_schedule(&est,"Tomorrow estimate");
+                print_schedule(&est,"Tomorrow Estimate");
 
                 est
             } else {Schedule::new()};
