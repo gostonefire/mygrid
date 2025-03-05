@@ -231,5 +231,5 @@ pub fn print_schedule(schedule: &Schedule, caption: &str) {
     for s in &schedule.blocks {
         println!("{}", s);
     }
-    println!("{:=<80}", caption.to_string() + " ");
+    println!("{:=<121}", caption.to_string() + " ");
 }

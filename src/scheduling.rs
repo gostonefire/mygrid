@@ -149,9 +149,36 @@ pub struct Block {
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, price {:0.3} {:?}",
-               self.status, self.block_type, self.start_hour, self.end_hour,
-               self.max_min_soc, self.max_soc, self.mean_price, self.hour_price)
+        // Divide all prices in chunks of max 8 prices
+        let price_chunks: Vec<Vec<f64>> = self.hour_price
+            .chunks(8)
+            .map(|c| c.to_vec())
+            .collect();
+
+        // Build base output
+        let mut output = format!("{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, price {:<7.3} ",
+                                 self.status, self.block_type, self.start_hour, self.end_hour,
+                                 self.max_min_soc, self.max_soc, self.mean_price);
+
+        // Build and attach text line for each chunk to the output string
+        let chunks = &mut price_chunks.iter().enumerate();
+        while let Some((i, chunk)) = chunks.next() {
+            let mut line = "[".to_string();
+            for price in chunk {
+                line.push_str(&format!("{:>6.2}", price));
+            }
+            line.push_str(" ]");
+
+            // First line should follow immediately after the base output, rest of lines
+            // shall start after 70 spaces from beginning
+            if i == 0 {
+                output.push_str(&line);
+            } else {
+                output.push_str(&format!("\n{:>70}{}", "", line));
+            }
+        }
+
+        write!(f, "{}", output)
     }
 }
 
