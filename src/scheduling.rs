@@ -163,6 +163,14 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    /// Creates a new empty schedule with its date set to yesterday
+    pub fn new() -> Schedule {
+        Schedule {
+            date: Local::now().add(TimeDelta::days(-1)),
+            blocks: Vec::new(),
+        }
+    }
+
     /// Creates a schedule over one day given that days tariffs.
     ///
     /// It divides the day over three segments and finds the best block for charging
@@ -251,7 +259,8 @@ impl Schedule {
                 self.blocks[b].max_soc = charge_level;
             }
         }
-        self.update_max_min_soc();
+        let day_charge_level = Self::get_charge_level((0..24).collect::<Vec<u8>>(), &production, &consumption);
+        self.update_max_min_soc(day_charge_level);
     }
 
     /// Updates max minSoC for all non-charge blocks
@@ -259,9 +268,12 @@ impl Schedule {
     /// block has been pushed higher than charge max soc (which reflects the wiggle room
     /// for PV power given production/consumption estimates)
     ///
-    fn update_max_min_soc(&mut self) {
+    /// # Arguments
+    ///
+    /// * 'day_charge_level' - the charge level for the entire day
+    fn update_max_min_soc(&mut self, day_charge_level: u8) {
         if self.blocks.len() == 1 {
-            self.blocks[0].max_min_soc = 50;
+            self.blocks[0].max_min_soc = day_charge_level;
         } else {
             let mut last_max_min_soc: u8 = 100;
             for b in 0..self.blocks.len() {

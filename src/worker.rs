@@ -12,11 +12,21 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
     -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
+    let mut day_ahead_schedule: Schedule = Schedule::new();
     let mut local_now: DateTime<Local>;
     let mut day_of_year = schedule.date.ordinal0();
     loop {
         thread::sleep(Duration::from_secs(10));
         local_now = Local::now();
+
+        // Create and display an estimated schedule for tomorrow
+        if local_now.hour() >= 15 && day_ahead_schedule.date.day() != local_now.day() {
+            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, &smhi, Some(1)) {
+                print_schedule(&est,"Tomorrow estimate");
+
+                est
+            } else {Schedule::new()};
+        }
 
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
@@ -71,10 +81,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
 
             // Save current schedule version
             save_schedule(&schedule, &backup_dir)?;
-            for s in &schedule.blocks {
-                println!("{}", s);
-            }
-            println!("Update =========================================================================");
+            print_schedule(&schedule,"Update");
         }
     }
 }
@@ -212,4 +219,17 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     let _ = retry!(||fox.set_max_soc(100))?;
 
     Ok(Status::Started)
+}
+
+/// Prints a schedule, i.e. its blocks, with a caption
+///
+/// # Arguments
+///
+/// * 'schedule' - the schedule to print
+/// * 'caption' - the caption to print
+pub fn print_schedule(schedule: &Schedule, caption: &str) {
+    for s in &schedule.blocks {
+        println!("{}", s);
+    }
+    println!("{:=<80}", caption.to_string() + " ");
 }

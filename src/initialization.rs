@@ -6,6 +6,7 @@ use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::scheduling::{create_new_schedule, load_schedule, Schedule};
+use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
@@ -20,7 +21,12 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
         .map_err(|e|MyGridInitError(format!("getting backup dir: {}", e)))?;
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
-    unsafe { DEBUG_MODE = bool::from_str(debug_mode.as_str()).unwrap_or(false); }
+    unsafe {
+        DEBUG_MODE = bool::from_str(debug_mode.as_str()).unwrap_or(false);
+        if DEBUG_MODE {
+            println!("Running in Debug Mode!!");
+        }
+    }
 
     // Instantiate structs
     let fox = Fox::new(api_key, inverter_sn);
@@ -29,21 +35,14 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
 
     // Create a first base schedule given only tariffs, charge level will later be updated
     let mut schedule = create_new_schedule(&nordpool, &smhi, None)?;
-
-    for s in &schedule.blocks {
-        println!("{}", s);
-    }
-    println!("Startup ========================================================================");
+    print_schedule(&schedule, "Startup");
 
     // Check if we have an existing schedule for the day that then may be updated with
     // already started/running blocks
     if let Some(s) = load_schedule(&backup_dir)? {
         schedule = s;
     }
-    for s in &schedule.blocks {
-        println!("{}", s);
-    }
-    println!("Backup =========================================================================");
+    print_schedule(&schedule, "Startup");
 
     Ok((fox, nordpool, smhi, schedule, backup_dir))
 }
