@@ -1,5 +1,6 @@
 use std::env;
-use crate::{LAT, LONG};
+use std::str::FromStr;
+use crate::{DEBUG_MODE, LAT, LONG};
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
@@ -17,6 +18,9 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
 
     let backup_dir = env::var("BACKUP_DIR")
         .map_err(|e|MyGridInitError(format!("getting backup dir: {}", e)))?;
+
+    let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
+    unsafe { DEBUG_MODE = bool::from_str(debug_mode.as_str()).unwrap_or(false); }
 
     // Instantiate structs
     let fox = Fox::new(api_key, inverter_sn);

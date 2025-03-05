@@ -23,6 +23,9 @@ const LAT: f64 = 56.22332313734338;
 /// Longitude of the power plant
 const LONG: f64 = 15.658393416666142;
 
+/// Debug mode means no write operations to inverter (except time)
+static mut DEBUG_MODE: bool = false;
+
 fn main() {
     let mut n_errors = 0;
     let mut last_error = Local::now();

@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, Timelike};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::{retry, wrapper};
+use crate::{retry, wrapper, DEBUG_MODE};
 use crate::errors::{MyGridWorkerError};
 use crate::scheduling::{create_new_schedule, save_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
@@ -112,6 +112,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
+    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let soc = retry!(||fox.get_current_soc())?;
     if soc >= block.max_soc {
@@ -146,6 +147,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
     if soc >= max_soc {
         let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
         println!("{} - Setting charge block to full",report_time);
+        unsafe {if DEBUG_MODE {return Ok(Some(Status::Full))}}
 
         let min_soc = max_soc.max(10).min(100);
 
@@ -178,6 +180,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
 fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting hold block",report_time);
+    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let soc = retry!(||fox.get_current_soc())?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
@@ -202,6 +205,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("{} - Setting use block",report_time);
+    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
     let _ = retry!(||fox.set_min_soc_on_grid(10))?;
