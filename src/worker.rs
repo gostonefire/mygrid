@@ -1,6 +1,7 @@
+use std::ops::Add;
 use std::thread;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, Local, Timelike};
+use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
@@ -21,7 +22,10 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
 
         // Create and display an estimated schedule for tomorrow
         if local_now.hour() >= 15 && day_ahead_schedule.date.day() != local_now.day() {
-            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, &smhi, Some(1)) {
+            let future = Local::now()
+                .add(chrono::Duration::days(1))
+                .duration_trunc(TimeDelta::days(1))?;
+            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, &smhi, future) {
                 print_schedule(&est,"Tomorrow Estimate");
 
                 est
@@ -31,7 +35,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
             check_inverter_local_time(&fox)?;
-            schedule = create_new_schedule(&nordpool, &smhi, None)?;
+            schedule = create_new_schedule(&nordpool, &smhi, local_now)?;
             day_of_year = local_now.ordinal0();
         }
 

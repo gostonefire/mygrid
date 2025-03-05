@@ -210,8 +210,9 @@ impl Schedule {
     /// # Arguments
     ///
     /// * 'tariffs' - tariffs from NordPool for the day to create schedule for
-    pub fn from_tariffs(tariffs: &Vec<f64>) -> Schedule {
-        let mut schedule = Schedule { date: Local::now(), blocks: Vec::new() };
+    /// * 'date_time' - date and time to stamp the schedule with
+    pub fn from_tariffs(tariffs: &Vec<f64>, date_time: DateTime<Local>) -> Schedule {
+        let mut schedule = Schedule { date: date_time, blocks: Vec::new() };
         let segments: [(u8,u8);3] = [(0,8 - CHARGE_LEN), (8, 16 - CHARGE_LEN), (16, 24 - CHARGE_LEN)];
 
         // Find the best charge block with following use block(s) where mean price for a use block is
@@ -624,14 +625,13 @@ impl Schedule {
 ///
 /// * 'nordpool' - reference to a NordPool struct
 /// * 'SMHI' - reference to a SMHI struct
-/// * 'future' - optional future in days, i.e. if set to 1 it will create a schedule for tomorrow
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, future: Option<usize>) -> Result<Schedule, SchedulingError> {
-    let d = future.map_or(0i64, |f| f as i64);
-    let forecast = retry!(||smhi.get_forecast(Local::now().add(TimeDelta::days(d))))?;
+/// * 'date_time' - the date for which the schedule shall be created
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
+    let forecast = retry!(||smhi.get_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
-    let tariffs = retry!(||nordpool.get_tariffs(Local::now().add(TimeDelta::days(d))))?;
-    let mut schedule = Schedule::from_tariffs(&tariffs).update_status();
+    let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
+    let mut schedule = Schedule::from_tariffs(&tariffs, date_time).update_status();
     schedule.update_charge_levels(&production, &consumption);
 
     Ok(schedule)

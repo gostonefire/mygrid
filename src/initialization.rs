@@ -1,5 +1,6 @@
 use std::env;
 use std::str::FromStr;
+use chrono::Local;
 use crate::{DEBUG_MODE, LAT, LONG};
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
@@ -34,7 +35,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
     let smhi = SMHI::new(LAT, LONG);
 
     // Create a first base schedule given only tariffs, charge level will later be updated
-    let mut schedule = create_new_schedule(&nordpool, &smhi, None)?;
+    let mut schedule = create_new_schedule(&nordpool, &smhi, Local::now())?;
     print_schedule(&schedule, "Startup");
 
     // Check if we have an existing schedule for the day that then may be updated with

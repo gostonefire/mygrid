@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fmt::Formatter;
-use chrono::{Local};
+use chrono::{Local, RoundingError};
 use crate::manager_fox_cloud::FoxError;
 use crate::scheduling::{BackupError, Block, SchedulingError};
 
@@ -61,4 +61,6 @@ impl From<FoxError> for MyGridWorkerError {
         MyGridWorkerError { msg: e.to_string(), block: None }
     }
 }
-
+impl From<RoundingError> for MyGridWorkerError {
+    fn from(e: RoundingError) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
+}
