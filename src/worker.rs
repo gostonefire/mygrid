@@ -21,7 +21,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
         local_now = Local::now();
 
         // Create and display an estimated schedule for tomorrow
-        if local_now.hour() >= 15 && day_ahead_schedule.date.day() != local_now.day() {
+        if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
             let future = Local::now()
                 .add(chrono::Duration::days(1))
                 .duration_trunc(TimeDelta::days(1))?;

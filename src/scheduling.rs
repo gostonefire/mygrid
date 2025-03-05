@@ -6,7 +6,7 @@ use std::io::{Read};
 use std::ops::Add;
 use std::thread;
 use std::time::Duration;
-use chrono::{DateTime, Local, TimeDelta, Timelike};
+use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike};
 use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
@@ -317,10 +317,15 @@ impl Schedule {
     /// Updates block status for those blocks still in waiting but passed time
     ///
     pub fn update_status(mut self) -> Self {
-        let now = Local::now().hour() as u8;
-        for s in self.blocks.iter_mut() {
-            if s.end_hour < now && s.status == Status::Waiting {
-                s.status = Status::Missed;
+        let local_now = Local::now();
+
+        if local_now.timestamp() >= self.date.timestamp() {
+            let now = local_now.hour() as u8;
+
+            for s in self.blocks.iter_mut() {
+                if s.end_hour < now && s.status == Status::Waiting {
+                    s.status = Status::Missed;
+                }
             }
         }
         self
