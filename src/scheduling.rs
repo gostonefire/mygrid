@@ -6,7 +6,7 @@ use std::io::{Read};
 use std::ops::Add;
 use std::thread;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike};
+use chrono::{DateTime, Local, TimeDelta, Timelike};
 use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
