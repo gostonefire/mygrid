@@ -26,6 +26,16 @@ const USE_LEN: u8 = 5;
 /// roughly how much each percentage of the SoC is in terms of power (Wh)
 const SOC_CAPACITY_W: f64 = 16590.0 / 100.0;
 
+/// The inverter round-trip efficiency.
+/// If a charge price is x, then the discharge tariff must be equal or higher
+/// than x / INVERTER_EFFICIENCY
+const INVERTER_EFFICIENCY: f64 = 0.8;
+
+/// The min tariff price an hour must meet or exceed for it to be part of a use block
+/// regardless of tariff price during battery charging. This to avoid chasing mosquito with
+/// an elephant gun, better save battery from charge cycles if it doesn't give money back.
+const MIN_USE_TARIFF: f64 = 0.5;
+
 pub struct SchedulingError(String);
 
 impl fmt::Display for SchedulingError {
@@ -176,8 +186,8 @@ impl Schedule {
         let mut blocks: Vec<Block> = Vec::new();
         for s in segments.iter() {
             let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, s.0, s.1);
-            blocks = Self::get_use_block(&tariffs, charge_block.mean_price / 0.8, USE_LEN,
-                                         charge_block.end_hour + 1, 23);
+            let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
+            blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
             if !blocks.is_empty() {
                 schedule.blocks.push(charge_block);
                 schedule.blocks.push(blocks[0].clone());
@@ -192,7 +202,8 @@ impl Schedule {
             // to end of day, with following use block(s)
             if blocks.len() == 1 {
                 let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, blocks[0].end_hour + 1, 23);
-                blocks = Self::get_use_block(&tariffs, charge_block.mean_price / 0.8, USE_LEN, charge_block.end_hour + 1, 23);
+                let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
+                blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
                 if !blocks.is_empty() {
                     schedule.blocks.push(charge_block);
                     schedule.blocks.push(blocks[0].clone());
@@ -201,7 +212,8 @@ impl Schedule {
             // and if that is not possible we instead choose the best of the two first use blocks
             } else if blocks.len() >= 1 {
                 let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, blocks[0].end_hour + 1, blocks[1].start_hour - 1);
-                let new_blocks = Self::get_use_block(&tariffs, charge_block.mean_price / 0.8, USE_LEN, charge_block.end_hour + 1, 23);
+                let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
+                let new_blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
                 if !new_blocks.is_empty() {
                     schedule.blocks.push(charge_block);
                     schedule.blocks.push(new_blocks[0].clone());
