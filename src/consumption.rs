@@ -1,7 +1,7 @@
 use crate::models::smhi_forecast::TimeValues;
 
 /// Min average consumption/load in watts over an hour
-const MIN_AVG_LOAD: f64 = 500.0;
+const MIN_AVG_LOAD: f64 = 300.0;
 
 /// Max average consumption/load in watts over an hour
 const MAX_AVG_LOAD: f64 = 3000.0;

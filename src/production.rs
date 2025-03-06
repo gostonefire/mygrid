@@ -3,7 +3,7 @@ use crate::{manager_sun};
 use crate::models::smhi_forecast::TimeValues;
 
 /// Max expected mean output from PV in watts during one hour
-const MAX_PV_POWER: f64 = 6000.0;
+const MAX_PV_POWER: f64 = 7000.0;
 
 /// The factor on how much of the sun elevation should contribute to the overall PV output
 /// in comparison to cloud index
