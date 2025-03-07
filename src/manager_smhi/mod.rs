@@ -1,5 +1,5 @@
 use std::fmt;
-use chrono::{DateTime, Local, Timelike};
+use chrono::{DateTime, Datelike, Local, Timelike};
 use reqwest::blocking::Client;
 use reqwest::{StatusCode};
 use crate::models::smhi_forecast::{FullForecast, TimeValues};
@@ -33,6 +33,7 @@ pub struct SMHI {
     client: Client,
     lat: f64,
     long: f64,
+    forecast: [TimeValues;24],
 }
 
 impl SMHI {
@@ -47,13 +48,14 @@ impl SMHI {
     /// * 'long' - longitude for the point to get forecasts for
     pub fn new(lat: f64, long: f64) -> SMHI {
         let client = Client::new();
-        Self { client, lat, long }
+        let forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 24];
+        Self { client, lat, long, forecast }
     }
 
 
     /// Retrieves a whether forecast from SMHI for the given date.
     /// The raw forecast consists of several days worth of data and many whether parameters
-    /// but the returned forecast will only include the specified data and data
+    /// but the returned forecast will only include the specified date and data
     /// representing cloud index (0-8) and forecasted temperatures.
     ///
     /// SMHI does not always return a forecast for every hour of a date, for instance if
@@ -63,7 +65,7 @@ impl SMHI {
     /// # Arguments
     ///
     /// * 'date_time' - the date to get a forecast for
-    pub fn get_forecast(&self, date_time: DateTime<Local>) -> Result<[TimeValues;24], SMHIError> {
+    pub fn get_forecast(&mut self, date_time: DateTime<Local>) -> Result<[TimeValues;24], SMHIError> {
         let smhi_domain = "https://opendata-download-metfcst.smhi.se";
         let base_url = "/api/category/pmp3g/version/2/geotype/point";
         let url = format!("{}{}/lon/{:0.4}/lat/{:0.4}/data.json",
@@ -106,7 +108,8 @@ impl SMHI {
         if forecast.len() == 0 {
             Err(SMHIError::SMHI(format!("No forecast found for {}", date_time.date_naive())))
         } else {
-            Ok(SMHI::fill_in_gaps(&forecast))
+            self.fill_in_gaps(forecast);
+            Ok(self.forecast)
         }
     }
 
@@ -116,18 +119,34 @@ impl SMHI {
     /// reports some few hours of the day.
     ///
     /// This function fills in those gaps given data available using a very simple
-    /// interpolate/extrapolate algorithm (i.e. split the half).
+    /// interpolate/extrapolate algorithm (i.e. split the half). If however any current forecast
+    /// in the struct contains data for those gaps, such data will be copied to the new forecast
+    /// before calculating data.
     ///
     /// # Arguments
     ///
     /// * 'forecast' - whether forecast to enrich (if needed)
-    fn fill_in_gaps(forecast: &Vec<TimeValues>) -> [TimeValues;24] {
+    fn fill_in_gaps(&mut self, mut forecast: Vec<TimeValues>) {
         let mut new_forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 24];
 
-        let available = forecast
+        let mut available = forecast
             .iter()
             .map(|t| t.valid_time.hour() as usize)
             .collect::<Vec<usize>>();
+
+        let year = forecast[0].valid_time.year();
+        let ordinal = forecast[0].valid_time.ordinal0();
+        for h in self.forecast {
+            if h.valid_time.year() == year && h.valid_time.ordinal0() == ordinal {
+                if !available.contains(&(h.valid_time.hour() as usize)) {
+                    forecast.push(h.clone());
+                    available.push(h.valid_time.hour() as usize);
+                }
+            }
+        }
+
+        available.sort();
+        forecast.sort_by(|a, b| a.valid_time.cmp(&b.valid_time));
 
         let mut next_to_set: usize = 0;
         for (i, h) in forecast.iter().enumerate() {
@@ -142,7 +161,7 @@ impl SMHI {
             next_to_set = next_hour;
         }
 
-        new_forecast
+        self.forecast = new_forecast;
     }
 }
 

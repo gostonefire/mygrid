@@ -410,7 +410,7 @@ impl Schedule {
             .iter().enumerate()
             .filter(|(h, _)| selected_hours.contains(&(*h as u8)))
             .map(|(h, &p)|
-                Self::calculate_spare_capacity(p, consumption.get_consumption(h), consumption.get_min_avg_load())
+                 p - consumption.get_consumption(h)
             )
             .filter(|sc| sc.round() as i64 != 0)
             .fold((0usize, 0.0f64), |acc, el| (acc.0 + 1, acc.1 + el));
@@ -419,9 +419,10 @@ impl Schedule {
         if segment.0 == 0 {
             charge_level = 100;
         } else {
-            charge_level = (100.0 - (segment.1 / segment.0 as f64) / SOC_CAPACITY_W).floor() as u8
+            //charge_level = (100.0 - (segment.1 / segment.0 as f64) / SOC_CAPACITY_W).floor() as u8
+            charge_level = (100.0 - segment.1 / SOC_CAPACITY_W).floor() as u8;
         }
-
+        eprintln!("{}", segment.1);
         if charge_level != 100 {
             charge_level.min(95)
         } else {
@@ -429,6 +430,7 @@ impl Schedule {
         }
     }
 
+    /*
     /// Calculates what spare capacity in watts that is needed to cover for either irregularities
     /// in the load when load is greater than production, or room needed when production is greater
     /// than load. If production is zero however we don't need any spare capacity at all.
@@ -451,6 +453,7 @@ impl Schedule {
         }
         diff
     }
+    */
 
     /// Adds hold blocks where there are no charge- or use blocks. Hold blocks tells the inverter to
     /// hold minimum charge att whatever SoC the previous block left with.
@@ -637,7 +640,7 @@ impl Schedule {
 /// * 'nordpool' - reference to a NordPool struct
 /// * 'SMHI' - reference to a SMHI struct
 /// * 'date_time' - the date for which the schedule shall be created
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.get_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
@@ -654,7 +657,7 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &SMHI, date_time: DateTime
 ///
 /// * 'schedule' - a mutable reference to an existing schedule to be updated
 /// * 'smhi' - reference to a SMHI struct
-pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &SMHI) -> Result<(), SchedulingError> {
+pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI) -> Result<(), SchedulingError> {
     let forecast = retry!(||smhi.get_forecast(Local::now()))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);

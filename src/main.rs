@@ -31,7 +31,7 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, smhi, schedule, backup_dir) = match init() {
+        let (fox, nordpool, mut smhi, schedule, backup_dir) = match init() {
             Ok((f, n, s, sc, b)) => (f, n, s, sc, b),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error);
@@ -39,7 +39,7 @@ fn main() {
             }
         };
 
-        match run(fox, nordpool, smhi, schedule, backup_dir) {
+        match run(fox, nordpool, &mut smhi, schedule, backup_dir) {
             Ok(()) => return,
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error);

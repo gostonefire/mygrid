@@ -32,10 +32,10 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
     // Instantiate structs
     let fox = Fox::new(api_key, inverter_sn);
     let nordpool = NordPool::new();
-    let smhi = SMHI::new(LAT, LONG);
+    let mut smhi = SMHI::new(LAT, LONG);
 
     // Create a first base schedule given only tariffs, charge level will later be updated
-    let mut schedule = create_new_schedule(&nordpool, &smhi, Local::now())?;
+    let mut schedule = create_new_schedule(&nordpool, &mut smhi, Local::now())?;
     print_schedule(&schedule, "Startup");
 
     // Check if we have an existing schedule for the day that then may be updated with

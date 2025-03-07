@@ -35,11 +35,6 @@ impl Consumption {
         self.hours[hour]
     }
 
-    /// Returns min average load used in calculations
-    pub fn get_min_avg_load(&self) -> f64 {
-        MIN_AVG_LOAD
-    }
-
     /// Calculates hourly household consumption based on temperature forecast
     ///
     /// The consumption goes down quite drastically with warmer whether so some inverse exponential
@@ -52,7 +47,6 @@ impl Consumption {
         let mut hour_load: [f64;24] = [0.0;24];
 
         for (h, v) in forecast.iter().enumerate() {
-            //let load_factor = 1.0 - v.temp.max(0.0).min(20.0) / 20.0;
             let temp = v.temp.max(0.0).min(20.0);
             let load_factor = (20.0 - temp).powi(5) / 20.0_f64.powi(5);
             let load = load_factor * (MAX_AVG_LOAD - MIN_AVG_LOAD) + MIN_AVG_LOAD;

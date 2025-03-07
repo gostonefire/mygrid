@@ -9,7 +9,7 @@ use crate::{retry, wrapper, DEBUG_MODE};
 use crate::errors::{MyGridWorkerError};
 use crate::scheduling::{create_new_schedule, save_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, backup_dir: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String)
     -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
@@ -25,7 +25,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
             let future = Local::now()
                 .add(chrono::Duration::days(1))
                 .duration_trunc(TimeDelta::days(1))?;
-            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, &smhi, future) {
+            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future) {
                 print_schedule(&est,"Tomorrow Estimate");
 
                 est
@@ -35,7 +35,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
             check_inverter_local_time(&fox)?;
-            schedule = create_new_schedule(&nordpool, &smhi, local_now)?;
+            schedule = create_new_schedule(&nordpool, smhi, local_now)?;
             day_of_year = local_now.ordinal0();
         }
 
@@ -61,7 +61,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: SMHI, mut schedule: Schedule, bac
                 BlockType::Charge => {
                     // To ensure we have the best charge level estimate we update the schedule
                     // given the latest forecast from SMHI.
-                    update_existing_schedule(&mut schedule, &smhi)?;
+                    update_existing_schedule(&mut schedule, smhi)?;
                     block = schedule.get_block_clone(b).unwrap();
 
                     status = set_charge(&fox, &block).map_err(|e| {
