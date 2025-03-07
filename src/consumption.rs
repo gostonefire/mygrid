@@ -54,6 +54,7 @@ impl Consumption {
         }
 
         self.hours = hour_load;
+        println!("cons: {:?}", self.hours);
     }
 }
 

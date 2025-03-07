@@ -422,7 +422,7 @@ impl Schedule {
             //charge_level = (100.0 - (segment.1 / segment.0 as f64) / SOC_CAPACITY_W).floor() as u8
             charge_level = (100.0 - segment.1 / SOC_CAPACITY_W).floor() as u8;
         }
-        eprintln!("{}", segment.1);
+
         if charge_level != 100 {
             charge_level.min(95)
         } else {
