@@ -265,14 +265,19 @@ impl Schedule {
     }
 
     /// Updates the schedule with charge levels for the charge blocks, i.e. what
-    /// maxSoC should be given estimated production and consumption following the charge
+    /// maxSoC should be given the estimated production and consumption following the charge
+    ///
+    /// The logic also ensures that a previous maxSoC can't be higher than a following since
+    /// that would in theory mean that there will not be enough room for PV power later
+    /// in the day (the battery SoC is potentially already over the following hours setting).
     ///
     /// # Arguments
     ///
     /// * 'production' - estimated production in watts per hour
     /// * 'consumption' - estimated consumption in watts per hour
     pub fn update_charge_levels(&mut self, production: &PVProduction, consumption: &Consumption) {
-        for b in 0..(self.blocks.len() - 1) {
+        let mut min_max_soc: u8 = 100;
+        for b in (0..(self.blocks.len() - 1)).rev() {
             if self.blocks[b].block_type == BlockType::Charge {
                 let mut selected_hours: Vec<u8> = Vec::new();
                 for b2 in (b + 1)..self.blocks.len() {
@@ -284,7 +289,8 @@ impl Schedule {
                     }
                 }
                 let charge_level = Self::get_charge_level(selected_hours, &production, &consumption);
-                self.blocks[b].max_soc = charge_level;
+                min_max_soc = min_max_soc.min(charge_level);
+                self.blocks[b].max_soc = min_max_soc;
             }
         }
         let day_charge_level = Self::get_charge_level((0..24).collect::<Vec<u8>>(), &production, &consumption);
