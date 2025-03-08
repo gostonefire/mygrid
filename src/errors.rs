@@ -38,8 +38,9 @@ impl MyGridWorkerError {
 impl fmt::Display for MyGridWorkerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-        write!(f, "{} ============================================================", report_time)?;
-        write!(f, "MyGridWorkerError: {}", self.msg)?;
+        let caption = format!("{} MyGridWorkerError ", report_time);
+        write!(f, "{:=<121}\n", caption)?;
+        write!(f, "{}\n", self.msg)?;
         if let Some(block) = &self.block {
             write!(f, "Block:\n{}", block.to_string())?;
         }
