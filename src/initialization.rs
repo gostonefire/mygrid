@@ -14,13 +14,11 @@ use crate::worker::print_schedule;
 ///
 pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
-        .map_err(|e|MyGridInitError(format!("getting API key: {}", e)))?;
-
+        .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
-        .map_err(|e|MyGridInitError(format!("getting inverter_sn: {}", e)))?;
-
+        .expect("Error getting FOX_ESS_INVERTER_SN");
     let backup_dir = env::var("BACKUP_DIR")
-        .map_err(|e|MyGridInitError(format!("getting backup dir: {}", e)))?;
+        .expect("Error getting BACKUP_DIR");
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
     unsafe {
