@@ -52,6 +52,14 @@ impl SMHI {
         Self { client, lat, long, forecast }
     }
 
+    /// Sets an existing forecast
+    ///
+    /// # Arguments
+    ///
+    /// * 'forecast' - the forecast to set
+    pub fn set_forecast(&mut self, forecast: [TimeValues; 24]) {
+        self.forecast = forecast;
+    }
 
     /// Retrieves a whether forecast from SMHI for the given date.
     /// The raw forecast consists of several days worth of data and many whether parameters
@@ -95,8 +103,8 @@ impl SMHI {
                 };
 
                 for params in ts.parameters {
-                    if params.name.eq("tcc_mean") {
-                        time_values.cloud = params.values[0];
+                    if params.name.eq("Wsymb2") {
+                        time_values.cloud = translate_wsymb2(params.values[0]);
                     } else if params.name.eq("t") {
                         time_values.temp = params.values[0];
                     }
@@ -165,4 +173,20 @@ impl SMHI {
     }
 }
 
-
+/// Translates whether symbols to values between 0 and 5 from SMHI Wsymb2 values
+/// Wsymb2 values are from 1-27 (see https://opendata.smhi.se/metfcst/pmp/parameters#cloud-cover-parameters)
+/// SMHI values 1-6 represent various levels of cloudy, the rest is for instance fog, rain, snow, etc.
+///
+/// This function uses 1-6 as-is and estimates all others as 6, and the scale is transformed to 0-5
+///
+/// # Arguments
+///
+/// * 'value' - the Wsymb2 value
+fn translate_wsymb2(value: f64) -> f64 {
+    let symbol = value.floor() as u32;
+    if symbol > 6 {
+        5.0
+    } else {
+        (symbol - 1) as f64
+    }
+}

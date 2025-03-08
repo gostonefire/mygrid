@@ -3,7 +3,7 @@ use crate::{manager_sun};
 use crate::models::smhi_forecast::TimeValues;
 
 /// Max expected mean output from PV in watts during one hour
-const MAX_PV_POWER: f64 = 6000.0;
+const MAX_PV_POWER: f64 = 7000.0;
 
 /// Min expected mean output from PV in watts during one hour (when sunny)
 const MIN_PV_POWER: f64 = 1000.0;
@@ -67,11 +67,9 @@ impl PVProduction {
             if elevation > 0.0 {
                 let power = PVProduction::get_production_factor(elevation, day_south_elev, min_south_elev, max_south_elev, v.cloud);
                 pv_production[h] = power;
-                //pv_production[h] = production_index * MAX_PV_POWER;
             }
         }
         self.hours = pv_production;
-        println!("prod: {:?}", self.hours);
     }
 
 
@@ -96,7 +94,7 @@ impl PVProduction {
             let sun_day_factor = elevation / day_south_elev;
             let sun_power = sun_top_power * sun_day_factor;
 
-            let cloud_factor = (8.0 - cloud_index) / 8.0 * CLOUD_IMPACT_FACTOR + (1.0 - CLOUD_IMPACT_FACTOR);
+            let cloud_factor = (5.0 - cloud_index) / 5.0 * CLOUD_IMPACT_FACTOR + (1.0 - CLOUD_IMPACT_FACTOR);
 
             sun_power * cloud_factor
         } else {

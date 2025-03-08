@@ -2,11 +2,12 @@ use std::env;
 use std::str::FromStr;
 use chrono::Local;
 use crate::{DEBUG_MODE, LAT, LONG};
+use crate::backup::load_backup;
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::scheduling::{create_new_schedule, load_schedule, Schedule};
+use crate::scheduling::{create_new_schedule, update_existing_schedule, Schedule};
 use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
@@ -34,16 +35,19 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
     let nordpool = NordPool::new();
     let mut smhi = SMHI::new(LAT, LONG);
 
-    // Create a first base schedule given only tariffs, charge level will later be updated
-    let mut schedule = create_new_schedule(&nordpool, &mut smhi, Local::now())?;
-    print_schedule(&schedule, "Startup");
+    let mut schedule: Schedule;
 
     // Check if we have an existing schedule for the day that then may be updated with
     // already started/running blocks
-    if let Some(s) = load_schedule(&backup_dir)? {
-        schedule = s;
+    if let Some(b) = load_backup(&backup_dir)? {
+        smhi.set_forecast(b.forecast);
+        schedule = b.schedule;
+        update_existing_schedule(&mut schedule, &mut smhi, &backup_dir)?;
+        print_schedule(&schedule, "From Backup");
+    } else {
+        schedule = create_new_schedule(&nordpool, &mut smhi, Local::now(), &backup_dir)?;
+        print_schedule(&schedule, "Startup");
     }
-    print_schedule(&schedule, "From Backup");
 
     Ok((fox, nordpool, smhi, schedule, backup_dir))
 }

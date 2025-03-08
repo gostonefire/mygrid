@@ -1,4 +1,4 @@
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::chrono::DateTime;
 use chrono::Local;
 
@@ -22,7 +22,7 @@ pub struct FullForecast {
     pub time_series: Vec<FullTimeSeries>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct TimeValues {
     pub valid_time: DateTime<Local>,
     pub temp: f64,

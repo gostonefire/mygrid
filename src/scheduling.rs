@@ -1,19 +1,17 @@
 use std::collections::{HashSet};
-use std::{fmt, fs};
+use std::{fmt};
 use std::fmt::Formatter;
-use std::fs::File;
-use std::io::{Read};
 use std::ops::Add;
 use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local, TimeDelta, Timelike};
-use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
 use crate::manager_nordpool::{NordPool, NordPoolError};
 use crate::manager_smhi::{SMHIError, SMHI};
 use crate::production::PVProduction;
 use crate::{retry, wrapper, LAT, LONG};
+use crate::backup::{save_backup, BackupError};
 use crate::manager_fox_cloud::FoxError;
 
 /// Time needed to fully charge batteries from SoC 10% to SoC 100%
@@ -63,33 +61,12 @@ impl From<SMHIError> for SchedulingError {
         SchedulingError(e.to_string())
     }
 }
+impl From<BackupError> for SchedulingError {
+    fn from(e: BackupError) -> Self {
+        SchedulingError(e.to_string())
+    }
+}
 
-pub struct BackupError(String);
-impl fmt::Display for BackupError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "BackupError: {}", self.0)
-    }
-}
-impl From<std::io::Error> for BackupError {
-    fn from(e: std::io::Error) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<serde_json::Error> for BackupError {
-    fn from(e: serde_json::Error) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::PatternError> for BackupError {
-    fn from(e: glob::PatternError) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::GlobError> for BackupError {
-    fn from(e: glob::GlobError) -> Self {
-        BackupError(e.to_string())
-    }
-}
 
 /// Available block types
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,7 +160,7 @@ impl fmt::Display for Block {
 }
 
 /// Struct representing one day's block schedule
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Schedule {
     pub date: DateTime<Local>,
     pub blocks: Vec<Block>,
@@ -410,7 +387,7 @@ impl Schedule {
             .iter().enumerate()
             .filter(|(h, _)| selected_hours.contains(&(*h as u8)))
             .map(|(h, &p)|
-                 p - consumption.get_consumption(h)
+                 p - consumption.get_hour_consumption(h)
             )
             .filter(|sc| sc.round() as i64 != 0)
             .fold((0usize, 0.0f64), |acc, el| (acc.0 + 1, acc.1 + el));
@@ -640,13 +617,14 @@ impl Schedule {
 /// * 'nordpool' - reference to a NordPool struct
 /// * 'SMHI' - reference to a SMHI struct
 /// * 'date_time' - the date for which the schedule shall be created
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.get_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
     let mut schedule = Schedule::from_tariffs(&tariffs, date_time).update_status();
     schedule.update_charge_levels(&production, &consumption);
+    save_backup(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
 
     Ok(schedule)
 }
@@ -657,60 +635,13 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
 ///
 /// * 'schedule' - a mutable reference to an existing schedule to be updated
 /// * 'smhi' - reference to a SMHI struct
-pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI) -> Result<(), SchedulingError> {
-    let forecast = retry!(||smhi.get_forecast(Local::now()))?;
+pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
+    let local_now = Local::now();
+    let forecast = retry!(||smhi.get_forecast(local_now))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     schedule.update_charge_levels(&production, &consumption);
+    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
 
     Ok(())
-}
-
-/// Saves schedule to file as json
-/// The filename gives at most one unique file per hour
-///
-/// # Arguments
-///
-/// * 'schedule' - the schedule to save
-/// * 'backup_dir' - the directory to save the file to
-pub fn save_schedule(schedule: &Schedule, backup_dir: &str) -> Result<(), BackupError> {
-    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d_%H"));
-    let json = serde_json::to_string(&schedule)?;
-    fs::write(file_path, json)?;
-
-    Ok(())
-}
-
-/// Loads schedule from json on file
-///
-/// This is mostly to avoid re-executing an already started block, hence it will just find
-/// the latest saved schedule for the current day
-///
-/// # Arguments
-///
-/// * 'backup_dir' - the directory to save the file to
-pub fn load_schedule(backup_dir: &str) -> Result<Option<Schedule>, BackupError> {
-    let mut entries: Vec<String> = Vec::new();
-    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d*"));
-    for entry in glob(&file_path)? {
-        let path = entry?;
-        if path.is_file() {
-            if let Some(os_path) = path.to_str() {
-                entries.push(os_path.to_string());
-            }
-        }
-    }
-
-    entries.sort();
-
-    if entries.len() > 0 {
-        let mut file = File::open(&entries[entries.len() - 1])?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        let schedule: Schedule = serde_json::from_str(&contents)?;
-
-        Ok(Some(schedule))
-    } else {
-        Ok(None)
-    }
 }

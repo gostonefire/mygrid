@@ -1,7 +1,7 @@
 use crate::models::smhi_forecast::TimeValues;
 
 /// Min average consumption/load in watts over an hour
-const MIN_AVG_LOAD: f64 = 300.0;
+const MIN_AVG_LOAD: f64 = 200.0;
 
 /// Max average consumption/load in watts over an hour
 const MAX_AVG_LOAD: f64 = 3000.0;
@@ -31,8 +31,13 @@ impl Consumption {
     /// # Arguments
     ///
     /// * 'hour' - hour to get estimated load for
-    pub fn get_consumption(&self, hour: usize) -> f64 {
+    pub fn get_hour_consumption(&self, hour: usize) -> f64 {
         self.hours[hour]
+    }
+
+    /// Return the hourly calculated consumption estimates
+    pub fn get_consumption(&self) -> [f64;24] {
+        self.hours
     }
 
     /// Calculates hourly household consumption based on temperature forecast
@@ -54,7 +59,6 @@ impl Consumption {
         }
 
         self.hours = hour_load;
-        println!("cons: {:?}", self.hours);
     }
 }
 

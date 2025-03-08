@@ -1,8 +1,9 @@
 use std::fmt;
 use std::fmt::Formatter;
 use chrono::{Local, RoundingError};
+use crate::backup::BackupError;
 use crate::manager_fox_cloud::FoxError;
-use crate::scheduling::{BackupError, Block, SchedulingError};
+use crate::scheduling::{Block, SchedulingError};
 
 pub struct MyGridInitError(pub String);
 

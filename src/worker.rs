@@ -7,12 +7,13 @@ use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE};
 use crate::errors::{MyGridWorkerError};
-use crate::scheduling::{create_new_schedule, save_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
+use crate::scheduling::{create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
 pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String)
     -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
+    let mut update_done: u32 = 24;
     let mut day_ahead_schedule: Schedule = Schedule::new();
     let mut local_now: DateTime<Local>;
     let mut day_of_year = schedule.date.ordinal0();
@@ -20,12 +21,17 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         thread::sleep(Duration::from_secs(10));
         local_now = Local::now();
 
+        if local_now.minute() == 0 && local_now.hour() != update_done {
+            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+            update_done = local_now.hour();
+        }
+
         // Create and display an estimated schedule for tomorrow
         if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
             let future = Local::now()
                 .add(chrono::Duration::days(1))
                 .duration_trunc(TimeDelta::days(1))?;
-            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future) {
+            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
                 print_schedule(&est,"Tomorrow Estimate");
 
                 est
@@ -35,7 +41,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
             check_inverter_local_time(&fox)?;
-            schedule = create_new_schedule(&nordpool, smhi, local_now)?;
+            schedule = create_new_schedule(&nordpool, smhi, local_now, &backup_dir)?;
+            update_done = local_now.hour();
             day_of_year = local_now.ordinal0();
         }
 
@@ -48,7 +55,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             if local_now.minute() % 5 == 0 {
                 if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
                     schedule.update_block_status(b, status)?;
-                    save_schedule(&schedule, &backup_dir)?;
+                    update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+                    update_done = local_now.hour();
                 }
             }
         }
@@ -59,9 +67,6 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             let mut block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
                 BlockType::Charge => {
-                    // To ensure we have the best charge level estimate we update the schedule
-                    // given the latest forecast from SMHI.
-                    update_existing_schedule(&mut schedule, smhi)?;
                     block = schedule.get_block_clone(b).unwrap();
 
                     status = set_charge(&fox, &block).map_err(|e| {
@@ -82,10 +87,14 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 },
             }
             schedule.update_block_status(b, status)?;
+            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+            update_done = local_now.hour();
 
-            // Save current schedule version
-            save_schedule(&schedule, &backup_dir)?;
             print_schedule(&schedule,"Update");
+
+        } else if local_now.minute() == 0 && local_now.hour() != update_done {
+            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+            update_done = local_now.hour();
         }
     }
 }
