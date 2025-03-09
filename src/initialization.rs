@@ -12,13 +12,15 @@ use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError> {
+pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
         .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
         .expect("Error getting FOX_ESS_INVERTER_SN");
     let backup_dir = env::var("BACKUP_DIR")
         .expect("Error getting BACKUP_DIR");
+    let stats_dir = env::var("STATS_DIR")
+        .expect("Error getting STATS_DIR");
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
     unsafe {
@@ -47,5 +49,5 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String), MyGridInitError
         print_schedule(&schedule, "Startup");
     }
 
-    Ok((fox, nordpool, smhi, schedule, backup_dir))
+    Ok((fox, nordpool, smhi, schedule, backup_dir, stats_dir))
 }

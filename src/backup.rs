@@ -1,10 +1,12 @@
 use std::{fmt, fs};
 use std::fmt::Formatter;
 use std::fs::File;
-use std::io::Read;
-use chrono::{DateTime, Local};
+use std::io::{Read, Write};
+use std::ops::Add;
+use chrono::{DateTime, DurationRound, Local, RoundingError, TimeDelta, Utc};
 use glob::glob;
 use serde::{Deserialize, Serialize};
+use crate::manager_fox_cloud::{Fox, FoxError};
 use crate::models::smhi_forecast::TimeValues;
 use crate::scheduling::{Schedule};
 
@@ -31,6 +33,16 @@ impl From<glob::PatternError> for BackupError {
 }
 impl From<glob::GlobError> for BackupError {
     fn from(e: glob::GlobError) -> Self {
+        BackupError(e.to_string())
+    }
+}
+impl From<RoundingError> for BackupError {
+    fn from(e: RoundingError) -> Self {
+        BackupError(e.to_string())
+    }
+}
+impl From<FoxError> for BackupError {
+    fn from(e: FoxError) -> Self {
         BackupError(e.to_string())
     }
 }
@@ -113,4 +125,37 @@ pub fn load_backup(backup_dir: &str) -> Result<Option<Backup>, BackupError> {
     } else {
         Ok(None)
     }
+}
+
+/// Gat and saves statistics from yesterday
+///
+/// # Arguments
+///
+/// * 'stats_dir' - the directory to save the file to
+/// * 'fox' - reference to the Fox struct
+pub fn save_yesterday_statistics(stats_dir: &str, fox: &Fox) -> Result<(), BackupError> {
+    let start = Local::now()
+        .add(chrono::Duration::days(-1))
+        .duration_trunc(TimeDelta::days(1))?
+        .with_timezone(&Utc);
+    let end =  start
+        .add(chrono::Duration::days(1))
+        .add(chrono::Duration::seconds(-1));
+    let device_history = fox.get_device_history_data(start, end)?;
+
+    let file_path = format!("{}{}.csv", stats_dir, device_history.date.format("%Y%m%d"));
+
+    let x =device_history.pv_power
+        .iter()
+        .zip(device_history.ld_power.iter())
+        .zip(device_history.time.iter()).map(|((&p, &l), t)| (t.clone(), p, l))
+        .collect::<Vec<(String, f64, f64)>>();
+
+    let mut f = File::create(file_path)?;
+    write!(f, "time,pvPower,ldPower\n")?;
+    for l in x {
+        write!(f, "{},{},{}\n", l.0, l.1, l.2)?
+    }
+
+    Ok(())
 }

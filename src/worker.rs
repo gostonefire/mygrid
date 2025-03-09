@@ -6,10 +6,11 @@ use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE};
+use crate::backup::save_yesterday_statistics;
 use crate::errors::{MyGridWorkerError};
 use crate::scheduling::{create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String, stats_dir: String)
     -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
@@ -26,7 +27,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             update_done = local_now.hour();
         }
 
-        // Create and display an estimated schedule for tomorrow
+        // Create and display an estimated schedule for tomorrow and save some stats from Fox
         if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
             let future = Local::now()
                 .add(chrono::Duration::days(1))
@@ -36,6 +37,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
 
                 est
             } else {Schedule::new()};
+            save_yesterday_statistics(&stats_dir, &fox)?;
         }
 
         // Create a new schedule everytime we go into a new day

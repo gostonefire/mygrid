@@ -1,12 +1,13 @@
 use std::fmt;
 use std::fmt::Formatter;
-use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, ParseError, TimeDelta, Timelike, Utc};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
 use reqwest::{StatusCode};
 use serde::{Deserialize, Serialize};
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
+use crate::models::fox_device_history_data::{DeviceHistory, DeviceHistoryData, DeviceHistoryResult, RequestDeviceHistoryData};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
@@ -51,6 +52,10 @@ impl From<serde_json::Error> for FoxError {
     }
 }
 
+impl From<ParseError> for FoxError {
+    fn from(e: ParseError) -> FoxError { FoxError::Document(e.to_string()) }
+}
+
 pub struct Fox {
     api_key: String,
     sn: String,
@@ -83,12 +88,10 @@ impl Fox {
         let path = "/op/v0/device/real/query";
 
         let req = RequestCurrentSoc { sn: self.sn.clone(), variables: vec!["SoC".to_string()] };
-//        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         let req_json = serde_json::to_string(&req)?;
 
         let json = self.post_request(&path, req_json)?;
 
-//        let fox_data: SocCurrentResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let fox_data: SocCurrentResult = serde_json::from_str(&json)?;
 
         Ok(fox_data.result[0].datas[0].value.round() as u8)
@@ -171,6 +174,36 @@ impl Fox {
         let _ = self.post_request(&path, req_json)?;
 
         Ok(())
+    }
+
+    /// Obtain history data from the inverter
+    ///
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20history20data0a3ca20id3dget20device20history20data4303e203ca3e
+    ///
+    /// # Arguments
+    ///
+    /// * 'start' - the start time of the report
+    /// * 'end' - the end time of the report
+    pub fn get_device_history_data(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<DeviceHistory, FoxError> {
+        let path = "/op/v0/device/history/query";
+
+        let req = RequestDeviceHistoryData {
+            sn: self.sn.clone(),
+            variables: ["pvPower", "loadsPower", "meterPower"]
+                .iter().map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            begin: start.timestamp_millis(),
+            end: end.timestamp_millis(),
+        };
+        
+        let req_json = serde_json::to_string(&req)?;
+
+        let json = self.post_request(&path, req_json)?;
+
+        let fox_data: DeviceHistoryResult = serde_json::from_str(&json)?;
+        let device_history = transform_history_data(start.with_timezone(&Local).date_naive(), fox_data.result)?;
+
+        Ok(device_history)
     }
 
     /*
@@ -326,8 +359,6 @@ impl Fox {
             .body(body)
             .send()?;
 
-            //.map_err(|e| format!("Post request error: {}", e.to_string()))?;
-
         let json = Fox::get_check_response(res)?;
 
         Ok(json)
@@ -366,12 +397,10 @@ impl Fox {
     fn get_check_response(response: Response) -> Result<String, FoxError> {
         if response.status() != StatusCode::OK {
             return Err(FoxError::FoxCloud(response.status().to_string()));
-            //return Err(format!("Http error: {}", response.status().to_string()))
         }
 
-//        let json = response.text().map_err(|e| e.to_string())?;
         let json = response.text()?;
-//        let fox_res: FoxResponse = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
         let fox_res: FoxResponse = serde_json::from_str(&json)?;
         if fox_res.errno != 0 {
             return Err(FoxError::FoxCloud(format!("errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
@@ -492,6 +521,41 @@ impl Fox {
 
         Ok(naive_device_time)
     }
+}
+
+/// Transforms device history data to a format easier to save as non-json file
+///
+/// # Arguments
+///
+/// * 'date' - the date the data is valid for
+/// * 'input' - the data to transform
+fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Result<DeviceHistory, FoxError> {
+    let mut time: Vec<String> = Vec::new();
+    let mut pv_power: Vec<f64> = Vec::new();
+    let mut ld_power: Vec<f64> = Vec::new();
+
+    for set in &input[0].data_set {
+        if set.variable == "pvPower" {
+            for data in &set.data {
+                let ndt = NaiveDateTime::parse_from_str(&data.time, "%Y-%m-%d %H:%M:%S %Z")?
+                    .format("%Y-%m-%d %H:%M").to_string();
+
+                time.push(ndt);
+                pv_power.push(data.value);
+            }
+        } else if set.variable == "loadsPower" {
+            for data in &set.data {
+                ld_power.push(data.value);
+            }
+        }
+    }
+
+    Ok(DeviceHistory {
+        date,
+        time,
+        pv_power,
+        ld_power,
+    })
 }
 
 #[derive(Serialize, Deserialize)]

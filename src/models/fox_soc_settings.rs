@@ -48,13 +48,15 @@ pub struct SocSettingRange {
     pub min: f64,
     pub max: f64,
 }
-*/
+
 
 #[derive(Serialize)]
 pub struct RequestSoc {
     pub sn: String,
     pub key: String,
 }
+*/
+
 
 #[derive(Serialize)]
 pub struct SetSoc {

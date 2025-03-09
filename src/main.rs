@@ -32,15 +32,15 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, mut smhi, schedule, backup_dir) = match init() {
-            Ok((f, n, s, sc, b)) => (f, n, s, sc, b),
+        let (fox, nordpool, mut smhi, schedule, backup_dir, stats_dir) = match init() {
+            Ok((f, n, s, sc, b, st)) => (f, n, s, sc, b, st),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error);
                 continue;
             }
         };
 
-        match run(fox, nordpool, &mut smhi, schedule, backup_dir) {
+        match run(fox, nordpool, &mut smhi, schedule, backup_dir, stats_dir) {
             Ok(()) => return,
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error);
