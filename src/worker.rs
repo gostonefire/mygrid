@@ -22,11 +22,6 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         thread::sleep(Duration::from_secs(10));
         local_now = Local::now();
 
-        if local_now.minute() == 0 && local_now.hour() != update_done {
-            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-            update_done = local_now.hour();
-        }
-
         // Create and display an estimated schedule for tomorrow and save some stats from Fox
         if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
             let future = Local::now()
@@ -37,6 +32,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
 
                 est
             } else {Schedule::new()};
+
             save_yesterday_statistics(&stats_dir, &fox)?;
         }
 
