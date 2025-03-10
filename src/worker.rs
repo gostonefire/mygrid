@@ -1,7 +1,6 @@
 use std::ops::Add;
 use std::thread;
-use std::time::Duration;
-use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike};
+use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike, Duration};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
@@ -15,17 +14,18 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
 
     // Main loop that runs once every ten seconds
     let mut update_done: u32 = 24;
+    let mut charge_check_done: DateTime<Local> = DateTime::default();
     let mut day_ahead_schedule: Schedule = Schedule::new();
     let mut local_now: DateTime<Local>;
     let mut day_of_year = schedule.date.ordinal0();
     loop {
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(std::time::Duration::from_secs(10));
         local_now = Local::now();
 
         // Create and display an estimated schedule for tomorrow and save some stats from Fox
         if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
             let future = Local::now()
-                .add(chrono::Duration::days(1))
+                .add(Duration::days(1))
                 .duration_trunc(TimeDelta::days(1))?;
             let current_forecast = smhi.get_forecast().clone();
             day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
@@ -59,12 +59,13 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         // has been reached. If so, we disable force charge and set the inverter min soc
         // on grid to max soc (i.e. we set it to Hold) and also set the block status to Full.
         if let Some(b) = schedule.get_current_started_charge(local_now.hour() as u8) {
-            if local_now.minute() % 5 == 0 {
+            if local_now - charge_check_done > Duration::minutes(5) {
                 if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
                     schedule.update_block_status(b, status)?;
                     update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
                     update_done = local_now.hour();
                 }
+                charge_check_done = local_now;
             }
         }
 
@@ -111,7 +112,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
     let now = Local::now().naive_local();
     let delta = (now - dt).abs();
 
-    if delta > chrono::Duration::minutes(1) {
+    if delta > Duration::minutes(1) {
         let _ = fox.set_device_time(now)?;
     }
 
