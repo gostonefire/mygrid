@@ -38,19 +38,19 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             save_yesterday_statistics(&stats_dir, &fox)?;
         }
 
-        // Update existing schedule once every hour to take into consideration any recent
-        // changes in whether forecasts
-        if local_now.minute() == 0 && local_now.hour() != update_done {
-            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-            update_done = local_now.hour();
-        }
-
         // Create a new schedule everytime we go into a new day
         if day_of_year != local_now.ordinal0() {
             check_inverter_local_time(&fox)?;
             schedule = create_new_schedule(&nordpool, smhi, local_now, &backup_dir)?;
             update_done = local_now.hour();
             day_of_year = local_now.ordinal0();
+        }
+
+        // Update existing schedule once every hour to take into consideration any recent
+        // changes in whether forecasts
+        if local_now.minute() == 0 && local_now.hour() != update_done {
+            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+            update_done = local_now.hour();
         }
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
