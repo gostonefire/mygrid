@@ -618,7 +618,7 @@ impl Schedule {
 /// * 'SMHI' - reference to a SMHI struct
 /// * 'date_time' - the date for which the schedule shall be created
 pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, backup_dir: &str) -> Result<Schedule, SchedulingError> {
-    let forecast = retry!(||smhi.get_forecast(date_time))?;
+    let forecast = retry!(||smhi.new_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
@@ -637,7 +637,7 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
 /// * 'smhi' - reference to a SMHI struct
 pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
     let local_now = Local::now();
-    let forecast = retry!(||smhi.get_forecast(local_now))?;
+    let forecast = retry!(||smhi.new_forecast(local_now))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     schedule.update_charge_levels(&production, &consumption);

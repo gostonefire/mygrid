@@ -27,13 +27,22 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             let future = Local::now()
                 .add(chrono::Duration::days(1))
                 .duration_trunc(TimeDelta::days(1))?;
+            let current_forecast = smhi.get_forecast().clone();
             day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
                 print_schedule(&est,"Tomorrow Estimate");
 
                 est
             } else {Schedule::new()};
+            smhi.set_forecast(current_forecast);
 
             save_yesterday_statistics(&stats_dir, &fox)?;
+        }
+
+        // Update existing schedule once every hour to take into consideration any recent
+        // changes in whether forecasts
+        if local_now.minute() == 0 && local_now.hour() != update_done {
+            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
+            update_done = local_now.hour();
         }
 
         // Create a new schedule everytime we go into a new day
@@ -86,13 +95,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             }
             schedule.update_block_status(b, status)?;
             update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-            update_done = local_now.hour();
 
             print_schedule(&schedule,"Update");
-
-        } else if local_now.minute() == 0 && local_now.hour() != update_done {
-            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-            update_done = local_now.hour();
         }
     }
 }
