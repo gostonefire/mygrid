@@ -62,6 +62,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             if local_now - charge_check_done > Duration::minutes(5) {
                 if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
                     schedule.update_block_status(b, status)?;
+                    schedule.reset_is_updated(b);
                     update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
                     update_done = local_now.hour();
                 }
@@ -69,14 +70,25 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             }
         }
 
+        // Check if we have any block in hold mode (i.e. Charge/Full or Hold/Started) for the given
+        // hour. If that block is updated due to changes in whether forecasts we update the
+        // min soc on grid to reflect new hold soc level.
+        if let Some(b) = schedule.get_conditional(
+            local_now.hour() as u8, vec!((&BlockType::Charge, &Status::Full), (&BlockType::Hold, &Status::Started))) {
+
+            let block = schedule.get_block_clone(b).unwrap();
+            if block.is_updated {
+                update_hold(&fox, block.max_min_soc)?;
+                schedule.reset_is_updated(b);
+            }
+        }
+
         // This is the main mode switch following the schedule
         if let Some(b) = schedule.get_eligible_for_start(local_now.hour() as u8) {
             let status: Status;
-            let mut block = schedule.get_block_clone(b).unwrap();
+            let block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
                 BlockType::Charge => {
-                    block = schedule.get_block_clone(b).unwrap();
-
                     status = set_charge(&fox, &block).map_err(|e| {
                         MyGridWorkerError::new(e.to_string(), &block)
                     })?;
@@ -95,6 +107,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 },
             }
             schedule.update_block_status(b, status)?;
+            schedule.reset_is_updated(b);
             update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
 
             print_schedule(&schedule,"Update");
@@ -213,6 +226,29 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     let _ = retry!(||fox.set_max_soc(100))?;
 
     Ok(Status::Started)
+}
+
+/// Updates a hold block in the inverter
+///
+/// This is similar to setting a hold block, but it doesn't change it status, it
+/// merely reflects that the max minSoC parameter has been updated for some reason
+/// and now has to be considered as a new min soc on grid in the inverter.
+///
+/// # Arguments
+///
+/// * 'fox' - reference to the Fox struct
+/// * 'max_min_soc' - max min soc allowed for the block
+fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    println!("{} - Updating hold block",report_time);
+    unsafe {if DEBUG_MODE {return Ok(())}}
+
+    let soc = retry!(||fox.get_current_soc())?;
+    let min_soc = max_min_soc.min(soc).max(10).min(100);
+
+    let _ = retry!(||fox.set_min_soc_on_grid(min_soc))?;
+
+    Ok(())
 }
 
 /// Sets a use block in the inverter

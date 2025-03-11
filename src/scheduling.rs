@@ -340,7 +340,7 @@ impl Schedule {
         None
     }
 
-    /// Returns, if any, the index of a currently running charge block with status Started
+    /// Returns, if any, the index of a running charge block with status Started
     ///
     /// # Arguments
     ///
@@ -351,6 +351,27 @@ impl Schedule {
             .enumerate()
             .filter(|(_, b)| {
                 b.block_type == BlockType::Charge && b.status == Status::Started && b.start_hour <= hour && b.end_hour >= hour
+            }) {
+            return Some(i);
+        }
+
+        None
+    }
+
+    /// Returns block index if the block meets stated conditions
+    ///
+    /// # Arguments
+    ///
+    /// * 'hour' - the hour to check for
+    /// * 'block_type' - a list of block types
+    /// * 'conditions' - a list of BlockType Status tuples
+    pub fn get_conditional(&self, hour: u8, conditions: Vec<(&BlockType, &Status)>) -> Option<usize> {
+        for (i, _) in self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| {
+                b.start_hour <= hour && b.end_hour >= hour && conditions.contains(&(&b.block_type, &b.status))
+                //block_type.contains(&b.block_type) && status.contains(&b.status) && b.start_hour <= hour && b.end_hour >= hour
             }) {
             return Some(i);
         }
@@ -380,11 +401,19 @@ impl Schedule {
     pub fn update_block_status(&mut self, block_idx: usize, status: Status) -> Result<(), SchedulingError>{
         if block_idx < self.blocks.len() {
             self.blocks[block_idx].status = status;
-            self.blocks[block_idx].is_updated = false;
             Ok(())
         } else {
             Err(SchedulingError(format!("block index {} not found", block_idx)))
         }
+    }
+
+    /// Resets the is updated flag for a block identified by its index
+    ///
+    /// # Arguments
+    ///
+    /// * 'block_idx' - index of block to reset
+    pub fn reset_is_updated(&mut self, block_idx: usize) {
+        self.blocks[block_idx].is_updated = false;
     }
 
     /// Get charge level for a given day and selected hours.
