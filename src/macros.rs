@@ -18,7 +18,7 @@ macro_rules! retry {
                 break res;
             }
             if wait <= 20 {
-                thread::sleep(Duration::from_secs(wait));
+                thread::sleep(std::time::Duration::from_secs(wait));
                 wait *= 2;
                 continue;
             }

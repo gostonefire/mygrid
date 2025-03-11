@@ -3,7 +3,6 @@ use std::{fmt};
 use std::fmt::Formatter;
 use std::ops::Add;
 use std::thread;
-use std::time::Duration;
 use chrono::{DateTime, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
@@ -120,6 +119,7 @@ pub struct Block {
     pub end_hour: u8,
     pub mean_price: f64,
     pub hour_price: Vec<f64>,
+    pub is_updated: bool,
     pub status: Status,
 }
 
@@ -133,9 +133,9 @@ impl fmt::Display for Block {
             .collect();
 
         // Build base output
-        let mut output = format!("{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, price {:<7.3} ",
+        let mut output = format!("{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, updated: {:>5}, price {:<7.3} ",
                                  self.status, self.block_type, self.start_hour, self.end_hour,
-                                 self.max_min_soc, self.max_soc, self.mean_price);
+                                 self.max_min_soc, self.max_soc, self.is_updated, self.mean_price);
 
         // Build and attach text line for each chunk to the output string
         let chunks = &mut price_chunks.iter().enumerate();
@@ -151,7 +151,7 @@ impl fmt::Display for Block {
             if i == 0 {
                 output.push_str(&line);
             } else {
-                output.push_str(&format!("\n{:>70}{}", "", line));
+                output.push_str(&format!("\n{:>86}{}", "", line));
             }
         }
 
@@ -252,7 +252,8 @@ impl Schedule {
     ///
     /// * 'production' - estimated production in watts per hour
     /// * 'consumption' - estimated consumption in watts per hour
-    pub fn update_charge_levels(&mut self, production: &PVProduction, consumption: &Consumption) {
+    /// * 'is_update' - whether this is an update to a new schedule or not
+    pub fn update_charge_levels(&mut self, production: &PVProduction, consumption: &Consumption, is_update: bool) {
         let mut min_max_soc: u8 = 100;
         for b in (0..(self.blocks.len() - 1)).rev() {
             if self.blocks[b].block_type == BlockType::Charge {
@@ -267,11 +268,14 @@ impl Schedule {
                 }
                 let charge_level = Self::get_charge_level(selected_hours, &production, &consumption);
                 min_max_soc = min_max_soc.min(charge_level);
+                if self.blocks[b].max_soc != min_max_soc && is_update {
+                    self.blocks[b].is_updated = true;
+                }
                 self.blocks[b].max_soc = min_max_soc;
             }
         }
         let day_charge_level = Self::get_charge_level((0..24).collect::<Vec<u8>>(), &production, &consumption);
-        self.update_max_min_soc(day_charge_level);
+        self.update_max_min_soc(day_charge_level, is_update);
     }
 
     /// Updates max minSoC for all non-charge blocks
@@ -282,8 +286,12 @@ impl Schedule {
     /// # Arguments
     ///
     /// * 'day_charge_level' - the charge level for the entire day
-    fn update_max_min_soc(&mut self, day_charge_level: u8) {
+    /// * 'is_update' - whether this is an update to a new schedule or not
+    fn update_max_min_soc(&mut self, day_charge_level: u8, is_update: bool) {
         if self.blocks.len() == 1 {
+            if self.blocks[0].max_min_soc != day_charge_level && is_update {
+                self.blocks[0].is_updated = true;
+            }
             self.blocks[0].max_min_soc = day_charge_level;
         } else {
             let mut last_max_min_soc: u8 = 100;
@@ -291,6 +299,9 @@ impl Schedule {
                 if self.blocks[b].block_type == BlockType::Charge {
                     last_max_min_soc = self.blocks[b].max_soc;
                 } else {
+                    if self.blocks[b].max_min_soc != last_max_min_soc && is_update {
+                        self.blocks[b].is_updated = true;
+                    }
                     self.blocks[b].max_min_soc = last_max_min_soc;
                 }
             }
@@ -369,6 +380,7 @@ impl Schedule {
     pub fn update_block_status(&mut self, block_idx: usize, status: Status) -> Result<(), SchedulingError>{
         if block_idx < self.blocks.len() {
             self.blocks[block_idx].status = status;
+            self.blocks[block_idx].is_updated = false;
             Ok(())
         } else {
             Err(SchedulingError(format!("block index {} not found", block_idx)))
@@ -482,6 +494,7 @@ impl Schedule {
             end_hour: end,
             mean_price: hour_price.iter().sum::<f64>() / hour_price.len() as f64,
             hour_price,
+            is_updated: false,
             status: Status::Waiting,
         }
     }
@@ -498,11 +511,12 @@ impl Schedule {
         let mut block: Block = Block {
             block_type: BlockType::Charge,
             max_min_soc: 100,
-            max_soc: 0,
+            max_soc: 100,
             start_hour: 0,
             end_hour: 0,
             mean_price: 10000.0,
             hour_price: Vec::new(),
+            is_updated: false,
             status: Status::Waiting,
         };
 
@@ -553,6 +567,7 @@ impl Schedule {
                     end_hour: start_hour + prices.len() as u8 - 1,
                     mean_price: prices.iter().sum::<f64>() / prices.len() as f64,
                     hour_price: prices,
+                    is_updated: false,
                     status: Status::Waiting,
                 });
             }
@@ -623,7 +638,7 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
     let mut schedule = Schedule::from_tariffs(&tariffs, date_time).update_status();
-    schedule.update_charge_levels(&production, &consumption);
+    schedule.update_charge_levels(&production, &consumption, false);
     save_backup(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
 
     Ok(schedule)
@@ -640,7 +655,7 @@ pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI, backup
     let forecast = retry!(||smhi.new_forecast(local_now))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
-    schedule.update_charge_levels(&production, &consumption);
+    schedule.update_charge_levels(&production, &consumption, true);
     save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
 
     Ok(())
