@@ -30,6 +30,9 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridI
         }
     }
 
+    // Print version
+    println!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
+
     // Instantiate structs
     let fox = Fox::new(api_key, inverter_sn);
     let nordpool = NordPool::new();
