@@ -87,7 +87,7 @@ pub fn save_backup(
             schedule: s,
         };
 
-        let json = serde_json::to_string(&backup)?;
+        let json = serde_json::to_string_pretty(&backup)?;
         fs::write(file_path, json)?;
     }
 
