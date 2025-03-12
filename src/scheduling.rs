@@ -659,8 +659,9 @@ impl Schedule {
 /// # Arguments
 ///
 /// * 'nordpool' - reference to a NordPool struct
-/// * 'SMHI' - reference to a SMHI struct
+/// * 'smhi' - reference to a SMHI struct
 /// * 'date_time' - the date for which the schedule shall be created
+/// * 'backup_dir' - the path to the backup directory
 pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
@@ -679,13 +680,33 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
 ///
 /// * 'schedule' - a mutable reference to an existing schedule to be updated
 /// * 'smhi' - reference to a SMHI struct
+/// * 'backup_dir' - the path to the backup directory
 pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
     let local_now = Local::now();
     let forecast = retry!(||smhi.new_forecast(local_now))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     schedule.update_charge_levels(&production, &consumption, true);
-    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
+    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), schedule)?;
+
+    Ok(())
+}
+
+/// Saves a backup of the current schedule including current charge levels
+/// This is very similar to the function update_existing_schedule, but it doesn't fetch a new
+/// forecast from SMHI, rather it uses the last one fetched.
+///
+/// # Arguments
+///
+/// * 'schedule' - a mutable reference to an existing schedule to be updated
+/// * 'smhi' - reference to a SMHI struct
+/// * 'backup_dir' - the path to the backup directory
+pub fn backup_schedule(schedule: &Schedule, smhi: &SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
+    let local_now = Local::now();
+    let forecast = smhi.get_forecast().clone();
+    let production = PVProduction::new(&forecast, LAT, LONG);
+    let consumption = Consumption::new(&forecast);
+    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), schedule)?;
 
     Ok(())
 }

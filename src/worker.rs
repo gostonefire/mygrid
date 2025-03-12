@@ -7,7 +7,7 @@ use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE};
 use crate::backup::save_yesterday_statistics;
 use crate::errors::{MyGridWorkerError};
-use crate::scheduling::{create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
+use crate::scheduling::{backup_schedule, create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
 pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String, stats_dir: String)
     -> Result<(), MyGridWorkerError> {
@@ -63,8 +63,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
                     schedule.update_block_status(b, status)?;
                     schedule.reset_is_updated(b);
-                    update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-                    update_done = local_now.hour();
+                    backup_schedule(&schedule, smhi, &backup_dir)?;
+                    print_schedule(&schedule,"Update");
                 }
                 charge_check_done = local_now;
             }
@@ -80,6 +80,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             if block.is_updated {
                 update_hold(&fox, block.max_min_soc)?;
                 schedule.reset_is_updated(b);
+                backup_schedule(&schedule, smhi, &backup_dir)?;
+                print_schedule(&schedule,"Update");
             }
         }
 
@@ -108,8 +110,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             }
             schedule.update_block_status(b, status)?;
             schedule.reset_is_updated(b);
-            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-
+            backup_schedule(&schedule, smhi, &backup_dir)?;
             print_schedule(&schedule,"Update");
         }
     }
@@ -283,5 +284,5 @@ pub fn print_schedule(schedule: &Schedule, caption: &str) {
     for s in &schedule.blocks {
         println!("{}", s);
     }
-    println!("{:=<121}", caption.to_string() + " ");
+    println!("{:=<137}", caption.to_string() + " ");
 }
