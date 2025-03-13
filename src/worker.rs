@@ -7,9 +7,10 @@ use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE};
 use crate::backup::save_yesterday_statistics;
 use crate::errors::{MyGridWorkerError};
+use crate::manager_mail::GMail;
 use crate::scheduling::{backup_schedule, create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, backup_dir: String, stats_dir: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, gmail: &GMail, backup_dir: String, stats_dir: String)
     -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
@@ -29,7 +30,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 .duration_trunc(TimeDelta::days(1))?;
             let current_forecast = smhi.get_forecast().clone();
             day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
-                print_schedule(&est,"Tomorrow Estimate");
+                print_schedule(&est,"Tomorrow Estimate", Some(gmail));
 
                 est
             } else {Schedule::new()};
@@ -64,7 +65,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                     schedule.update_block_status(b, status)?;
                     schedule.reset_is_updated(b);
                     backup_schedule(&schedule, smhi, &backup_dir)?;
-                    print_schedule(&schedule,"Update");
+                    print_schedule(&schedule,"Update", None);
                 }
                 charge_check_done = local_now;
             }
@@ -81,7 +82,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 update_hold(&fox, block.max_min_soc)?;
                 schedule.reset_is_updated(b);
                 backup_schedule(&schedule, smhi, &backup_dir)?;
-                print_schedule(&schedule,"Update");
+                print_schedule(&schedule,"Update", None);
             }
         }
 
@@ -111,7 +112,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             schedule.update_block_status(b, status)?;
             schedule.reset_is_updated(b);
             backup_schedule(&schedule, smhi, &backup_dir)?;
-            print_schedule(&schedule,"Update");
+            print_schedule(&schedule,"Update", None);
         }
     }
 }
@@ -280,9 +281,15 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'schedule' - the schedule to print
 /// * 'caption' - the caption to print
-pub fn print_schedule(schedule: &Schedule, caption: &str) {
+pub fn print_schedule(schedule: &Schedule, caption: &str, gmail: Option<&GMail>) {
+    let mut msg = String::new();
     for s in &schedule.blocks {
-        println!("{}", s);
+        msg += &format!("{}\n", s);
     }
-    println!("{:=<137}", caption.to_string() + " ");
+    msg += &format!("{:=<137}\n", caption.to_string() + " ");
+    println!("{}", msg);
+
+    if let Some(g) = gmail {
+        let _ = g.send_mail(caption.to_string(), msg);
+    }
 }

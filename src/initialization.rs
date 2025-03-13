@@ -13,7 +13,7 @@ use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridInitError> {
+pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, GMail, String, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
         .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
@@ -46,8 +46,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridI
     let fox = Fox::new(api_key, inverter_sn);
     let nordpool = NordPool::new();
     let mut smhi = SMHI::new(LAT, LONG);
-    let mail = GMail::new(mail_user, mail_passwd, mail_from, mail_to)?;
-    mail.send_mail("Test sending from mygrid".to_string(), "Hi!\nJust a test!\n/PS".to_string())?;
+    let gmail = GMail::new(mail_user, mail_passwd, mail_from, mail_to)?;
 
     let mut schedule: Schedule;
 
@@ -57,11 +56,11 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridI
         smhi.set_forecast(b.forecast);
         schedule = b.schedule;
         update_existing_schedule(&mut schedule, &mut smhi, &backup_dir)?;
-        print_schedule(&schedule, "From Backup");
+        print_schedule(&schedule, "From Backup", None);
     } else {
         schedule = create_new_schedule(&nordpool, &mut smhi, Local::now(), &backup_dir)?;
-        print_schedule(&schedule, "Startup");
+        print_schedule(&schedule, "Startup", None);
     }
 
-    Ok((fox, nordpool, smhi, schedule, backup_dir, stats_dir))
+    Ok((fox, nordpool, smhi, schedule, gmail, backup_dir, stats_dir))
 }
