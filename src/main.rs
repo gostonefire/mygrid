@@ -17,6 +17,7 @@ mod initialization;
 mod worker;
 mod errors;
 mod backup;
+mod manager_mail;
 
 /// Latitude of the power plant
 const LAT: f64 = 56.22332313734338;

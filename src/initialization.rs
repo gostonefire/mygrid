@@ -5,6 +5,7 @@ use crate::{DEBUG_MODE, LAT, LONG};
 use crate::backup::load_backup;
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
+use crate::manager_mail::GMail;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::scheduling::{create_new_schedule, update_existing_schedule, Schedule};
@@ -21,6 +22,14 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridI
         .expect("Error getting BACKUP_DIR");
     let stats_dir = env::var("STATS_DIR")
         .expect("Error getting STATS_DIR");
+    let mail_user = env::var("MAIL_USER")
+        .expect("Error getting MAIL_USER");
+    let mail_passwd = env::var("MAIL_PASSWORD")
+        .expect("Error getting MAIL_PASSWORD");
+    let mail_from = env::var("MAIL_FROM")
+        .expect("Error getting MAIL_FROM");
+    let mail_to = env::var("MAIL_TO")
+        .expect("Error getting MAIL_TO");
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
     unsafe {
@@ -37,6 +46,8 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, String, String), MyGridI
     let fox = Fox::new(api_key, inverter_sn);
     let nordpool = NordPool::new();
     let mut smhi = SMHI::new(LAT, LONG);
+    let mail = GMail::new(mail_user, mail_passwd, mail_from, mail_to)?;
+    mail.send_mail("Test sending from mygrid".to_string(), "Hi!\nJust a test!\n/PS".to_string())?;
 
     let mut schedule: Schedule;
 
