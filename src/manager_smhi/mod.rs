@@ -1,7 +1,7 @@
 use std::fmt;
+use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, Timelike};
-use reqwest::blocking::Client;
-use reqwest::{StatusCode};
+use ureq::{Agent, Error};
 use crate::models::smhi_forecast::{FullForecast, TimeValues};
 
 pub enum SMHIError {
@@ -17,8 +17,8 @@ impl fmt::Display for SMHIError {
         }
     }
 }
-impl From<reqwest::Error> for SMHIError {
-    fn from(e: reqwest::Error) -> Self {
+impl From<Error> for SMHIError {
+    fn from(e: Error) -> Self {
         SMHIError::SMHI(e.to_string())
     }
 }
@@ -30,7 +30,7 @@ impl From<serde_json::Error> for SMHIError {
 
 /// Struct for managing whether forecasts produced by SMHI
 pub struct SMHI {
-    client: Client,
+    agent: Agent,
     lat: f64,
     long: f64,
     forecast: [TimeValues;24],
@@ -47,9 +47,15 @@ impl SMHI {
     /// * 'lat' - latitude for the point to get forecasts for
     /// * 'long' - longitude for the point to get forecasts for
     pub fn new(lat: f64, long: f64) -> SMHI {
-        let client = Client::new();
+        let config = Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build();
+
+        let agent = config.into();
+
         let forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 24];
-        Self { client, lat, long, forecast }
+
+        Self { agent, lat, long, forecast }
     }
 
     /// Sets an existing forecast
@@ -87,15 +93,12 @@ impl SMHI {
 
         let date = date_time.date_naive();
 
-        let res = self.client
+        let json = self.agent
             .get(url)
-            .send()?;
+            .call()?
+            .body_mut()
+            .read_to_string()?;
 
-        if res.status() != StatusCode::OK {
-            return Err(SMHIError::SMHI(res.status().to_string()));
-        }
-
-        let json = res.text()?;
         let tmp_forecast: FullForecast = serde_json::from_str(&json)?;
 
         let mut forecast: Vec<TimeValues> = Vec::with_capacity(24);

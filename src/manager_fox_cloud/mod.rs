@@ -1,11 +1,12 @@
 use std::fmt;
 use std::fmt::Formatter;
+use std::str::FromStr;
+use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, ParseError, TimeDelta, Timelike, Utc};
-use reqwest::blocking::{Client, Response};
-use reqwest::header::{HeaderMap, HeaderValue};
 use md5::{Digest, Md5};
-use reqwest::{StatusCode};
 use serde::{Deserialize, Serialize};
+use ureq::{Agent, Error};
+use ureq::http::{HeaderMap, HeaderName, HeaderValue};
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_device_history_data::{DeviceHistory, DeviceHistoryData, DeviceHistoryResult, RequestDeviceHistoryData};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
@@ -40,8 +41,8 @@ impl From<&str> for FoxError {
     }
 }
 
-impl From<reqwest::Error> for FoxError {
-    fn from(e: reqwest::Error) -> FoxError {
+impl From<Error> for FoxError {
+    fn from(e: Error) -> FoxError {
         FoxError::FoxCloud(e.to_string())
     }
 }
@@ -59,7 +60,7 @@ impl From<ParseError> for FoxError {
 pub struct Fox {
     api_key: String,
     sn: String,
-    client: Client,
+    agent: Agent,
 }
 
 impl Fox {
@@ -70,12 +71,13 @@ impl Fox {
     /// * 'api_key' - API key for communication with Fox Cloud
     /// * 'sn' - the serial number of the inverter to manage
     pub fn new(api_key: String, sn: String) -> Self {
-        let client = Client::new();
-        Self {
-            api_key,
-            sn,
-            client,
-        }
+        let config = Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build();
+
+        let agent = config.into();
+
+        Self { api_key, sn, agent }
     }
 
     /// Obtain the battery current soc (state of charge)
@@ -350,16 +352,20 @@ impl Fox {
     /// * body - a string containing the payload in json format
     fn post_request(&self, path: &str, body: String) -> Result<String, FoxError> {
         let url = format!("{}{}", REQUEST_DOMAIN, path);
-        let mut header = self.generate_header(&path);
-        header.append("Content-Type", HeaderValue::from_str("application/json").unwrap());
 
-        let res = self.client
-            .post(url)
-            .headers(header)
-            .body(body)
-            .send()?;
+        let mut req = self.agent.post(url);
+        let headers = req.headers_mut().ok_or(FoxError::FoxCloud("RequestBuilder Error".to_string()))?;
+        self.generate_headers(headers, &path, Some(vec!(("Content-Type", "application/json"))));
 
-        let json = Fox::get_check_response(res)?;
+        let json = req
+            .send(body)?
+            .body_mut()
+            .read_to_string()?;
+
+        let fox_res: FoxResponse = serde_json::from_str(&json)?;
+        if fox_res.errno != 0 {
+            return Err(FoxError::FoxCloud(format!("errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
+        }
 
         Ok(json)
     }
@@ -369,9 +375,10 @@ impl Fox {
     ///
     /// # Arguments
     ///
+    /// * 'headers' - a header map to insert new headers into
     /// * 'path' - the path, excluding the domain part, to the FoxESS specific API
-    fn generate_header(&self, path: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
+    /// * 'extra' - any extra headers to add besides FoxCloud standards
+    fn generate_headers(&self, headers: &mut HeaderMap, path: &str, extra: Option<Vec<(&str, &str)>>) {
 
         let timestamp = Utc::now().timestamp() * 1000;
         let signature = format!("{}\\r\\n{}\\r\\n{}", path, self.api_key, timestamp);
@@ -380,33 +387,16 @@ impl Fox {
         hasher.update(signature.as_bytes());
         let signature_md5 = hasher.finalize().iter().map(|x| format!("{:02x}", x)).collect::<String>();
 
-        headers.append("token", HeaderValue::from_str(&self.api_key).unwrap());
-        headers.append("timestamp", HeaderValue::from_str(&timestamp.to_string()).unwrap());
-        headers.append("signature", HeaderValue::from_str(&signature_md5).unwrap());
-        headers.append("lang", HeaderValue::from_str("en").unwrap());
+        headers.insert("token", HeaderValue::from_str(&self.api_key).unwrap());
+        headers.insert("timestamp", HeaderValue::from_str(&timestamp.to_string()).unwrap());
+        headers.insert("signature", HeaderValue::from_str(&signature_md5).unwrap());
+        headers.insert("lang", HeaderValue::from_str("en").unwrap());
 
-        headers
-    }
-
-    /// Extracts the text body from the response, it also checks for http error and
-    /// Fox ESS specific error
-    ///
-    /// # Arguments
-    ///
-    /// * 'response' - the response object from a Fox ESS request
-    fn get_check_response(response: Response) -> Result<String, FoxError> {
-        if response.status() != StatusCode::OK {
-            return Err(FoxError::FoxCloud(response.status().to_string()));
+        if let Some(h) = extra {
+            h.iter().for_each(|&(k, v)| {
+                headers.insert(HeaderName::from_str(k).unwrap(), HeaderValue::from_str(v).unwrap());
+            });
         }
-
-        let json = response.text()?;
-
-        let fox_res: FoxResponse = serde_json::from_str(&json)?;
-        if fox_res.errno != 0 {
-            return Err(FoxError::FoxCloud(format!("errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
-        }
-
-        Ok(json)
     }
 
     /// Builds a charge time schedule after first checking for inconsistencies.

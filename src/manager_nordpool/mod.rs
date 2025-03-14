@@ -1,8 +1,8 @@
 use std::fmt;
 use std::fmt::Formatter;
+use std::time::Duration;
 use chrono::{DateTime, Local, Timelike};
-use reqwest::blocking::{Client};
-use reqwest::{StatusCode};
+use ureq::{Agent, Error};
 use crate::models::nordpool_tariffs::Tariffs;
 
 pub enum NordPoolError {
@@ -23,8 +23,8 @@ impl From<&str> for NordPoolError {
         NordPoolError::NordPool(e.to_string())
     }
 }
-impl From<reqwest::Error> for NordPoolError {
-    fn from(e: reqwest::Error) -> Self {
+impl From<Error> for NordPoolError {
+    fn from(e: Error) -> Self {
         NordPoolError::NordPool(e.to_string())
     }
 }
@@ -35,13 +35,18 @@ impl From<serde_json::Error> for NordPoolError {
 }
 
 pub struct NordPool {
-    client: Client,
+    agent: Agent,
 }
 
 impl NordPool {
     pub fn new() -> NordPool {
-        let client = Client::new();
-        NordPool { client }
+        let config = Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build();
+
+        let agent = config.into();
+
+        Self { agent }
     }
 
     /// Retrieves day ahead prices from NordPool
@@ -59,16 +64,12 @@ impl NordPool {
             ("currency", "SEK"),
         ];
 
-        let res = self.client
+        let json = self.agent
             .get(url)
-            .query(&query)
-            .send()?;
-
-        if res.status() != StatusCode::OK {
-            return Err(NordPoolError::NordPool(res.status().to_string()));
-        }
-
-        let json = res.text()?;
+            .query_pairs(query)
+            .call()?
+            .body_mut()
+            .read_to_string()?;
 
         let tariffs: Tariffs = serde_json::from_str(&json)?;
 
