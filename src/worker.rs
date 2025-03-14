@@ -128,6 +128,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
     let delta = (now - dt).abs();
 
     if delta > Duration::minutes(1) {
+        print_msg("Setting inverter time", "Update", None);
         let _ = fox.set_device_time(now)?;
     }
 
@@ -148,8 +149,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 /// * 'block' - the configuration to use
 fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    println!("{} - Setting charge block: maxSoC: {}, start: {}, end: {}",report_time, block.max_soc, block.start_hour, block.end_hour);
+    print_msg("Setting charge block", "Update", None);
     unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let soc = retry!(||fox.get_current_soc())?;
@@ -183,8 +183,7 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
 fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWorkerError> {
     let soc= retry!(||fox.get_current_soc())?;
     if soc >= max_soc {
-        let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-        println!("{} - Setting charge block to full",report_time);
+        print_msg("Setting charge block to full", "Update", None);
         unsafe {if DEBUG_MODE {return Ok(Some(Status::Full))}}
 
         let min_soc = max_soc.max(10).min(100);
@@ -216,8 +215,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
 /// * 'fox' - reference to the Fox struct
 /// * 'max_min_soc' - max min soc allowed for the block
 fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    println!("{} - Setting hold block",report_time);
+    print_msg("Setting hold block", "Update", None);
     unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let soc = retry!(||fox.get_current_soc())?;
@@ -241,8 +239,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 /// * 'max_min_soc' - max min soc allowed for the block
 fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    println!("{} - Updating hold block",report_time);
+    print_msg("Updating hold block", "Update", None);
     unsafe {if DEBUG_MODE {return Ok(())}}
 
     let soc = retry!(||fox.get_current_soc())?;
@@ -264,8 +261,7 @@ fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
 ///
 /// * 'fox' - reference to the Fox struct
 fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    println!("{} - Setting use block",report_time);
+    print_msg("Setting use block", "Update", None);
     unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
@@ -283,11 +279,32 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
 /// * 'caption' - the caption to print
 /// * 'mail' - mail sender struct
 pub fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
-    let mut msg = String::new();
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    let caption = format!("{} {} ", report_time, caption);
+
+    let mut msg = format!("{:=<137}\n", caption.to_string() + " ");
     for s in &schedule.blocks {
         msg += &format!("{}\n", s);
     }
-    msg += &format!("{:=<137}\n", caption.to_string() + " ");
+    println!("{}", msg);
+
+    if let Some(m) = mail {
+        let _ = m.send_mail(caption.to_string(), msg);
+    }
+}
+
+/// Prints a message with a caption
+///
+/// # Arguments
+///
+/// * 'message' - the message
+/// * 'caption' - the caption to print
+/// * 'mail' - mail sender struct
+fn print_msg(message: &str, caption: &str, mail: Option<&Mail>) {
+    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    let caption = format!("{} {} ", report_time, caption);
+
+    let msg = format!("{:=<137}\n{}\n", caption.to_string() + " ", message);
     println!("{}", msg);
 
     if let Some(m) = mail {
