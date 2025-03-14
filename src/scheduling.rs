@@ -430,14 +430,13 @@ impl Schedule {
             .map(|(h, &p)|
                  p - consumption.get_hour_consumption(h)
             )
-            .filter(|sc| sc.round() as i64 != 0)
+            .filter(|&sc| sc > 0.0)
             .fold((0usize, 0.0f64), |acc, el| (acc.0 + 1, acc.1 + el));
 
         let charge_level: u8;
         if segment.0 == 0 {
             charge_level = 100;
         } else {
-            //charge_level = (100.0 - (segment.1 / segment.0 as f64) / SOC_CAPACITY_W).floor() as u8
             charge_level = (100.0 - segment.1 / SOC_CAPACITY_W).floor() as u8;
         }
 
@@ -447,31 +446,6 @@ impl Schedule {
             100
         }
     }
-
-    /*
-    /// Calculates what spare capacity in watts that is needed to cover for either irregularities
-    /// in the load when load is greater than production, or room needed when production is greater
-    /// than load. If production is zero however we don't need any spare capacity at all.
-    ///
-    /// # Arguments
-    ///
-    /// * 'production' - production in watts from PV
-    /// * 'load' - the household load in watts (i.e. not grid consumption which may include battery charging)
-    /// * 'min_avg_load' - min average consumption/load in watts over an hour
-    fn calculate_spare_capacity(production: f64, load: f64, min_avg_load: f64) -> f64 {
-        let mut diff = production - load;
-        if diff < 0.0 {
-            if production.round() as i64 == 0 {
-                diff = 0.0;
-            } else {
-                diff = ((production - min_avg_load).max(0.0) / 2.0).max(5.0 * SOC_CAPACITY_W);
-            }
-        } else {
-            diff = diff.max(10.0 * SOC_CAPACITY_W);
-        }
-        diff
-    }
-    */
 
     /// Adds hold blocks where there are no charge- or use blocks. Hold blocks tells the inverter to
     /// hold minimum charge att whatever SoC the previous block left with.
