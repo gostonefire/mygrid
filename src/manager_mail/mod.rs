@@ -1,49 +1,57 @@
 use std::fmt::{Display, Formatter};
-use lettre::message::header::ContentType;
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::{Message, SmtpTransport, Transport};
-use lettre::address::AddressError;
-use lettre::message::Mailbox;
+use std::time::Duration;
+use ureq::{Agent, Error};
+use crate::models::sendgrid::{Address, Content, Email, Personalizations};
 
-
-const SMTP_RELAY: &str = "smtp.gmail.com";
-
-pub struct GMailError(pub String);
-
-impl Display for GMailError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "GMailError: {}", self.0) }
-}
-impl From<AddressError> for GMailError {
-    fn from(e: AddressError) -> Self { GMailError(e.to_string()) }
-}
-impl From<lettre::error::Error> for GMailError {
-    fn from(e: lettre::error::Error) -> Self { GMailError(e.to_string()) }
-}
-impl From<lettre::transport::smtp::Error> for GMailError {
-    fn from(e: lettre::transport::smtp::Error) -> Self { GMailError(e.to_string()) }
+pub enum MailError {
+    InvalidEmailAddress(String),
+    Document(String),
+    SendgridError(String),
 }
 
-pub struct GMail {
-    creds: Credentials,
-    from: Mailbox,
-    to: Mailbox,
+impl Display for MailError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MailError::InvalidEmailAddress(e) => write!(f, "MailError::InvalidEmailAddress: {}", e),
+            MailError::Document(e) => write!(f, "MailError::Document: {}", e),
+            MailError::SendgridError(e) => write!(f, "MailError::SendgridError: {}", e),
+        }
+    }
+}
+impl From<serde_json::Error> for MailError {
+    fn from(e: serde_json::Error) -> Self { MailError::Document(e.to_string()) }
+}
+impl From<Error> for MailError {
+    fn from(e: Error) -> Self { MailError::SendgridError(e.to_string()) }
+}
+pub struct Mail {
+    api_key: String,
+    agent: Agent,
+    from: Address,
+    to: Address,
 }
 
-impl GMail {
-    /// Returns a new instance of the GMail struct
+impl Mail {
+    /// Returns a new instance of the Mail struct
     ///
     /// # Arguments
     ///
-    /// * 'login' - login name for gmail
-    /// * 'password' - app password for the mygrid google app
+    /// * 'api_key' - the api key for sendgrid
     /// * 'from' - sender email address
     /// * 'to' - receiver email address
-    pub fn new(login: String, password: String, from: String, to: String) -> Result<GMail, GMailError> {
+    pub fn new(api_key: String, from: String, to: String) -> Result<Self, MailError> {
+        let config = Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build();
+
+        let agent = config.into();
+
         Ok(
-            GMail {
-                creds: Credentials::new(login, password),
-                from: from.parse::<Mailbox>()?,
-                to: to.parse::<Mailbox>()?,
+            Self {
+                agent,
+                api_key,
+                from: from.parse::<Address>()?,
+                to: to.parse::<Address>()?,
             }
         )
     }
@@ -54,20 +62,22 @@ impl GMail {
     ///
     /// * 'subject' - the subject of the mail
     /// * 'body' - the body of the mail
-    pub fn send_mail(&self, subject: String, body: String) -> Result<(), GMailError> {
-        let email = Message::builder()
-            .from(self.from.clone())
-            .reply_to(self.from.clone())
-            .to(self.to.clone())
-            .subject(subject)
-            .header(ContentType::TEXT_PLAIN)
-            .body(body)?;
+    pub fn send_mail(&self, subject: String, body: String) -> Result<(), MailError> {
 
-        let mailer = SmtpTransport::relay(SMTP_RELAY)?
-            .credentials(self.creds.clone())
-            .build();
+        let req = Email {
+            personalizations: vec![Personalizations { to: vec![self.to.clone()]}],
+            from: self.from.clone(),
+            subject,
+            content: vec![Content { content_type: "text/plain".to_string(), value: body }],
+        };
 
-        mailer.send(&email)?;
+        let json = serde_json::to_string(&req)?;
+
+        let _ = self.agent
+            .post("https://api.sendgrid.com/v3/mail/send")
+            .content_type("application/json")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send(json)?;
 
         Ok(())
     }

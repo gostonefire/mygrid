@@ -7,11 +7,11 @@ use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE};
 use crate::backup::save_yesterday_statistics;
 use crate::errors::{MyGridWorkerError};
-use crate::manager_mail::GMail;
+use crate::manager_mail::Mail;
 use crate::scheduling::{backup_schedule, create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, gmail: &GMail, backup_dir: String, stats_dir: String)
-    -> Result<(), MyGridWorkerError> {
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, mail: &Mail, backup_dir: String, stats_dir: String)
+           -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
     let mut update_done: u32 = 24;
@@ -30,7 +30,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 .duration_trunc(TimeDelta::days(1))?;
             let current_forecast = smhi.get_forecast().clone();
             day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
-                print_schedule(&est,"Tomorrow Estimate", Some(gmail));
+                print_schedule(&est,"Tomorrow Estimate", Some(mail));
 
                 est
             } else {Schedule::new()};
@@ -281,7 +281,8 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'schedule' - the schedule to print
 /// * 'caption' - the caption to print
-pub fn print_schedule(schedule: &Schedule, caption: &str, gmail: Option<&GMail>) {
+/// * 'mail' - mail sender struct
+pub fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
     let mut msg = String::new();
     for s in &schedule.blocks {
         msg += &format!("{}\n", s);
@@ -289,7 +290,7 @@ pub fn print_schedule(schedule: &Schedule, caption: &str, gmail: Option<&GMail>)
     msg += &format!("{:=<137}\n", caption.to_string() + " ");
     println!("{}", msg);
 
-    if let Some(g) = gmail {
-        let _ = g.send_mail(caption.to_string(), msg);
+    if let Some(m) = mail {
+        let _ = m.send_mail(caption.to_string(), msg);
     }
 }

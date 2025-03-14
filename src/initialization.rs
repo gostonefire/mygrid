@@ -5,7 +5,7 @@ use crate::{DEBUG_MODE, LAT, LONG};
 use crate::backup::load_backup;
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
-use crate::manager_mail::GMail;
+use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::scheduling::{create_new_schedule, update_existing_schedule, Schedule};
@@ -13,7 +13,7 @@ use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, GMail, String, String), MyGridInitError> {
+pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
         .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
@@ -22,9 +22,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, GMail, String, String), 
         .expect("Error getting BACKUP_DIR");
     let stats_dir = env::var("STATS_DIR")
         .expect("Error getting STATS_DIR");
-    let mail_user = env::var("MAIL_USER")
-        .expect("Error getting MAIL_USER");
-    let mail_passwd = env::var("MAIL_PASSWORD")
+    let mail_api_key = env::var("MAIL_API_KEY")
         .expect("Error getting MAIL_PASSWORD");
     let mail_from = env::var("MAIL_FROM")
         .expect("Error getting MAIL_FROM");
@@ -46,7 +44,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, GMail, String, String), 
     let fox = Fox::new(api_key, inverter_sn);
     let nordpool = NordPool::new();
     let mut smhi = SMHI::new(LAT, LONG);
-    let gmail = GMail::new(mail_user, mail_passwd, mail_from, mail_to)?;
+    let mail = Mail::new(mail_api_key, mail_from, mail_to)?;
 
     let mut schedule: Schedule;
 
@@ -62,5 +60,5 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, GMail, String, String), 
         print_schedule(&schedule, "Startup", None);
     }
 
-    Ok((fox, nordpool, smhi, schedule, gmail, backup_dir, stats_dir))
+    Ok((fox, nordpool, smhi, schedule, mail, backup_dir, stats_dir))
 }

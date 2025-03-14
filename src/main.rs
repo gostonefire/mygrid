@@ -2,7 +2,7 @@ use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local};
 use crate::initialization::init;
-use crate::manager_mail::GMail;
+use crate::manager_mail::Mail;
 use crate::worker::run;
 
 mod manager_nordpool;
@@ -69,8 +69,9 @@ fn main() {
 /// * 'msg' - the error message to print to std err
 /// * 'n_errors' - the number of errors occurred so far with spacing under one hour
 /// * 'last_error' - the time the last error occurred
-fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Local>, gmail: Option<&GMail>) -> (i32, DateTime<Local>) {
-    if let Some(g) = gmail {
+/// * 'mail' - mail sender struct
+fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Local>, mail: Option<&Mail>) -> (i32, DateTime<Local>) {
+    if let Some(g) = mail {
         let _ = g.send_mail("Error caught".to_string(), msg.clone());
     }
 
@@ -80,8 +81,8 @@ fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Local>, gma
     if now - last_error > chrono::Duration::minutes(60) {
         n_errors = 1;
     } else if n_errors >= 10 {
-        if let Some(g) = gmail {
-            let _ = g.send_mail("Error caught".to_string(), "Not resolved within time limit!\nWill panic!".to_string());
+        if let Some(m) = mail {
+            let _ = m.send_mail("Error caught".to_string(), "Not resolved within time limit!\nWill panic!".to_string());
             thread::sleep(Duration::from_secs(10));
         }
         panic!();

@@ -3,7 +3,7 @@ use std::fmt::Formatter;
 use chrono::{Local, RoundingError};
 use crate::backup::BackupError;
 use crate::manager_fox_cloud::FoxError;
-use crate::manager_mail::GMailError;
+use crate::manager_mail::MailError;
 use crate::scheduling::{Block, SchedulingError};
 
 pub struct MyGridInitError(pub String);
@@ -23,8 +23,8 @@ impl From<BackupError> for MyGridInitError {
         MyGridInitError(e.to_string())
     }
 }
-impl From<GMailError> for MyGridInitError {
-    fn from(e: GMailError) -> Self { MyGridInitError(e.to_string()) }
+impl From<MailError> for MyGridInitError {
+    fn from(e: MailError) -> Self { MyGridInitError(e.to_string()) }
 }
 
 pub struct MyGridWorkerError {
