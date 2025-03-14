@@ -1,51 +1,15 @@
-use std::{fmt, fs};
-use std::fmt::Formatter;
+use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::ops::Add;
-use chrono::{DateTime, DurationRound, Local, RoundingError, TimeDelta, Utc};
+use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
 use glob::glob;
 use serde::{Deserialize, Serialize};
-use crate::manager_fox_cloud::{Fox, FoxError};
+use crate::errors::BackupError;
+use crate::manager_fox_cloud::Fox;
 use crate::models::smhi_forecast::TimeValues;
 use crate::scheduling::{Schedule};
 
-pub struct BackupError(String);
-impl fmt::Display for BackupError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "BackupError: {}", self.0)
-    }
-}
-impl From<std::io::Error> for BackupError {
-    fn from(e: std::io::Error) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<serde_json::Error> for BackupError {
-    fn from(e: serde_json::Error) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::PatternError> for BackupError {
-    fn from(e: glob::PatternError) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::GlobError> for BackupError {
-    fn from(e: glob::GlobError) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<RoundingError> for BackupError {
-    fn from(e: RoundingError) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<FoxError> for BackupError {
-    fn from(e: FoxError) -> Self {
-        BackupError(e.to_string())
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct Backup {

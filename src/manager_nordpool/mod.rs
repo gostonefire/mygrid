@@ -1,38 +1,11 @@
-use std::fmt;
-use std::fmt::Formatter;
+pub mod errors;
+
 use std::time::Duration;
 use chrono::{DateTime, Local, Timelike};
-use ureq::{Agent, Error};
+use ureq::Agent;
+use crate::manager_nordpool::errors::NordPoolError;
 use crate::models::nordpool_tariffs::Tariffs;
 
-pub enum NordPoolError {
-    NordPool(String),
-    Document(String),
-}
-
-impl fmt::Display for NordPoolError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            NordPoolError::NordPool(e) => write!(f, "NordPoolError::NordPool: {}", e),
-            NordPoolError::Document(e) => write!(f, "NordPoolError::Document: {}", e),
-        }
-    }
-}
-impl From<&str> for NordPoolError {
-    fn from(e: &str) -> Self {
-        NordPoolError::NordPool(e.to_string())
-    }
-}
-impl From<Error> for NordPoolError {
-    fn from(e: Error) -> Self {
-        NordPoolError::NordPool(e.to_string())
-    }
-}
-impl From<serde_json::Error> for NordPoolError {
-    fn from(e: serde_json::Error) -> Self {
-        NordPoolError::Document(e.to_string())
-    }
-}
 
 pub struct NordPool {
     agent: Agent,

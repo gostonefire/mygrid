@@ -6,12 +6,12 @@ use std::thread;
 use chrono::{DateTime, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
-use crate::manager_nordpool::{NordPool, NordPoolError};
-use crate::manager_smhi::{SMHIError, SMHI};
+use crate::manager_nordpool::NordPool;
+use crate::manager_smhi::SMHI;
 use crate::production::PVProduction;
 use crate::{retry, wrapper, LAT, LONG};
-use crate::backup::{save_backup, BackupError};
-use crate::manager_fox_cloud::FoxError;
+use crate::backup::save_backup;
+use crate::errors::SchedulingError;
 
 /// Time needed to fully charge batteries from SoC 10% to SoC 100%
 const CHARGE_LEN: u8 = 3;
@@ -33,38 +33,6 @@ const INVERTER_EFFICIENCY: f64 = 0.8;
 /// an elephant gun, better save battery from charge cycles if it doesn't give money back.
 const MIN_USE_TARIFF: f64 = 0.5;
 
-pub struct SchedulingError(String);
-
-impl fmt::Display for SchedulingError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-            write!(f, "SchedulingError: {}", self.0)
-    }
-}
-impl From<&str> for SchedulingError {
-    fn from(e: &str) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
-impl From<FoxError> for SchedulingError {
-    fn from(e: FoxError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
-impl From<NordPoolError> for SchedulingError {
-    fn from(e: NordPoolError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
-impl From<SMHIError> for SchedulingError {
-    fn from(e: SMHIError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
-impl From<BackupError> for SchedulingError {
-    fn from(e: BackupError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
 
 
 /// Available block types

@@ -1,61 +1,19 @@
-use std::fmt;
-use std::fmt::Formatter;
+pub mod errors;
+
 use std::str::FromStr;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, ParseError, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
-use ureq::{Agent, Error};
+use ureq::Agent;
 use ureq::http::{HeaderMap, HeaderName, HeaderValue};
+use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_device_history_data::{DeviceHistory, DeviceHistoryData, DeviceHistoryResult, RequestDeviceHistoryData};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
-
-pub enum FoxError {
-    FoxCloud(String),
-    Document(String),
-    Other(String),
-}
-impl fmt::Display for FoxError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            FoxError::FoxCloud(e) => write!(f, "FoxError::FoxCloud: {}", e),
-            FoxError::Document(e) => write!(f, "FoxError::Document: {}", e),
-            FoxError::Other(e) => write!(f, "FoxError::Schedule: {}", e),
-        }
-    }
-}
-
-impl From<String> for FoxError {
-    fn from(e: String) -> Self {
-        FoxError::Other(e)
-    }
-}
-
-impl From<&str> for FoxError {
-    fn from(e: &str) -> Self {
-        FoxError::Other(e.to_string())
-    }
-}
-
-impl From<Error> for FoxError {
-    fn from(e: Error) -> FoxError {
-        FoxError::FoxCloud(e.to_string())
-    }
-}
-
-impl From<serde_json::Error> for FoxError {
-    fn from(e: serde_json::Error) -> FoxError {
-        FoxError::Document(e.to_string())
-    }
-}
-
-impl From<ParseError> for FoxError {
-    fn from(e: ParseError) -> FoxError { FoxError::Document(e.to_string()) }
-}
 
 pub struct Fox {
     api_key: String,

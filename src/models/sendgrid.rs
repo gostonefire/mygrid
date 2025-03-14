@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use serde::{Deserialize, Serialize};
-use crate::manager_mail::MailError;
+use crate::manager_mail::errors::MailError;
 
 #[derive(Serialize, Deserialize)]
 pub struct Content {
