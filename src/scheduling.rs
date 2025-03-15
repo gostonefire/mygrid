@@ -132,6 +132,7 @@ impl fmt::Display for Block {
 pub struct Schedule {
     pub date: DateTime<Local>,
     pub blocks: Vec<Block>,
+    pub tariffs: [f64;24],
 }
 
 impl Schedule {
@@ -140,6 +141,7 @@ impl Schedule {
         Schedule {
             date: Local::now().add(TimeDelta::days(-1)),
             blocks: Vec::new(),
+            tariffs: [0.0; 24],
         }
     }
 
@@ -156,8 +158,10 @@ impl Schedule {
     ///
     /// * 'tariffs' - tariffs from NordPool for the day to create schedule for
     /// * 'date_time' - date and time to stamp the schedule with
-    pub fn from_tariffs(tariffs: &Vec<f64>, date_time: DateTime<Local>) -> Schedule {
-        let mut schedule = Schedule { date: date_time, blocks: Vec::new() };
+    pub fn from_tariffs(tariffs: &Vec<f64>, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
+        let mut schedule = Schedule { date: date_time, blocks: Vec::new(), tariffs: [0.0;24] };
+        schedule.tariffs_to_array(tariffs)?;
+
         let segments: [(u8,u8);3] = [(0,8 - CHARGE_LEN), (8, 16 - CHARGE_LEN), (16, 24 - CHARGE_LEN)];
 
         // Find the best charge block with following use block(s) where mean price for a use block is
@@ -206,7 +210,7 @@ impl Schedule {
             }
         }
 
-        Self::add_hold_blocks(schedule, tariffs)
+        Ok(Self::add_hold_blocks(schedule, tariffs).tariffs_to_array(tariffs)?)
     }
 
     /// Updates the schedule with charge levels for the charge blocks, i.e. what
@@ -423,7 +427,7 @@ impl Schedule {
     /// * 'schedule' - the schedule to fill hold blocks to
     /// * 'tariffs' - used to fill in mean price also for hold blocks
     fn add_hold_blocks(schedule: Schedule, tariffs: &Vec<f64>) -> Schedule {
-        let mut new_schedule = Schedule { date: schedule.date, blocks: Vec::new() };
+        let mut new_schedule = Schedule { date: schedule.date, blocks: Vec::new(), tariffs: schedule.tariffs };
         if schedule.blocks.is_empty() {
             new_schedule.blocks.push(Self::create_hold_block(tariffs, 0, 23));
             return new_schedule;
@@ -594,6 +598,19 @@ impl Schedule {
         filtered_blocks
     }
 
+    /// Collects tariffs from vector nad stores values in Self
+    ///
+    /// # Arguments
+    ///
+    /// * 'tariffs' - NordPool tariffs
+    fn tariffs_to_array(&mut self, tariffs: &Vec<f64>) -> Result<Self, SchedulingError> {
+        if tariffs.len() == 24 {
+            tariffs.iter().enumerate().for_each(|(i, &t)| self.tariffs[i] = t);
+            Ok(self.to_owned())
+        } else {
+            Err(SchedulingError(format!("Tariffs vector illegal length: {}", tariffs.len())))
+        }
+    }
 }
 
 /// Creates a new schedule including updating charge levels
@@ -609,7 +626,7 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
-    let mut schedule = Schedule::from_tariffs(&tariffs, date_time).update_status();
+    let mut schedule = Schedule::from_tariffs(&tariffs, date_time)?.update_status();
     schedule.update_charge_levels(&production, &consumption, false);
     save_backup(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
 
