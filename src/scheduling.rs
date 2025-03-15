@@ -429,14 +429,14 @@ impl Schedule {
     fn add_hold_blocks(schedule: Schedule, tariffs: &Vec<f64>) -> Schedule {
         let mut new_schedule = Schedule { date: schedule.date, blocks: Vec::new(), tariffs: schedule.tariffs };
         if schedule.blocks.is_empty() {
-            new_schedule.blocks.push(Self::create_hold_block(tariffs, 0, 23));
+            new_schedule.blocks.push(Self::create_block(tariffs, 0, 23, BlockType::Use));
             return new_schedule;
         }
 
         let mut next_start_hour: u8 = 0;
         for block in schedule.blocks {
             if block.start_hour != next_start_hour {
-                new_schedule.blocks.push(Self::create_hold_block(tariffs, next_start_hour, block.start_hour - 1));
+                new_schedule.blocks.push(Self::create_block(tariffs, next_start_hour, block.start_hour - 1, BlockType::Hold));
             }
 
             next_start_hour = block.end_hour + 1;
@@ -444,7 +444,7 @@ impl Schedule {
         }
 
         if next_start_hour != 24 {
-            new_schedule.blocks.push(Self::create_hold_block(tariffs, next_start_hour, 23));
+            new_schedule.blocks.push(Self::create_block(tariffs, next_start_hour, 23, BlockType::Hold));
         }
         new_schedule
     }
@@ -459,10 +459,10 @@ impl Schedule {
     /// * 'tariffs' - used to fill in mean price
     /// * 'start' - start hour for the block
     /// * 'end' - end hour (inclusive) for the block
-    fn create_hold_block(tariffs: &Vec<f64>, start: u8, end: u8) -> Block {
+    fn create_block(tariffs: &Vec<f64>, start: u8, end: u8, block_type: BlockType) -> Block {
         let hour_price = tariffs[start as usize..=end as usize].to_vec();
         Block {
-            block_type: BlockType::Hold,
+            block_type,
             max_min_soc: 100,
             max_soc: 100,
             start_hour: start,
