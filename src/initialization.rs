@@ -30,9 +30,9 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String), M
         .expect("Error getting MAIL_TO");
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
-    unsafe {
-        DEBUG_MODE = bool::from_str(debug_mode.as_str()).unwrap_or(false);
-        if DEBUG_MODE {
+    {
+        *DEBUG_MODE.write()? = bool::from_str(debug_mode.as_str()).unwrap_or(false);
+        if *DEBUG_MODE.read()? {
             println!("Running in Debug Mode!!");
         }
     }

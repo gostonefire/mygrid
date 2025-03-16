@@ -1,5 +1,6 @@
 use std::fmt;
 use std::fmt::Formatter;
+use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
 use chrono::{Local, RoundingError};
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
@@ -29,6 +30,12 @@ impl From<BackupError> for MyGridInitError {
 }
 impl From<MailError> for MyGridInitError {
     fn from(e: MailError) -> Self { MyGridInitError(e.to_string()) }
+}
+impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridInitError {
+    fn from(e: PoisonError<RwLockReadGuard<'_, bool>>) -> Self { MyGridInitError(e.to_string()) }
+}
+impl From<PoisonError<RwLockWriteGuard<'_, bool>>> for MyGridInitError {
+    fn from(e: PoisonError<RwLockWriteGuard<'_, bool>>) -> Self { MyGridInitError(e.to_string()) }
 }
 
 
@@ -78,6 +85,10 @@ impl From<FoxError> for MyGridWorkerError {
 impl From<RoundingError> for MyGridWorkerError {
     fn from(e: RoundingError) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
 }
+impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridWorkerError {
+    fn from(e: PoisonError<RwLockReadGuard<'_, bool>>) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
+}
+
 
 
 /// Error depicting errors that occur while doing backup operations

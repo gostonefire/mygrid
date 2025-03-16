@@ -150,7 +150,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 /// * 'block' - the configuration to use
 fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting charge block", "Update", None);
-    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
+    if *DEBUG_MODE.read()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
     if soc >= block.max_soc {
@@ -184,7 +184,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
     let soc= retry!(||fox.get_current_soc())?;
     if soc >= max_soc {
         print_msg("Setting charge block to full", "Update", None);
-        unsafe {if DEBUG_MODE {return Ok(Some(Status::Full))}}
+        if *DEBUG_MODE.read()? {return Ok(Some(Status::Full))}
 
         let min_soc = max_soc.max(10).min(100);
 
@@ -216,7 +216,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
 /// * 'max_min_soc' - max min soc allowed for the block
 fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting hold block", "Update", None);
-    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
+    if *DEBUG_MODE.read()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
@@ -240,7 +240,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 /// * 'max_min_soc' - max min soc allowed for the block
 fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
     print_msg("Updating hold block", "Update", None);
-    unsafe {if DEBUG_MODE {return Ok(())}}
+    if *DEBUG_MODE.read()? {return Ok(())}
 
     let soc = retry!(||fox.get_current_soc())?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
@@ -262,7 +262,7 @@ fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting use block", "Update", None);
-    unsafe {if DEBUG_MODE {return Ok(Status::Started)}}
+    if *DEBUG_MODE.read()? {return Ok(Status::Started)}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
     let _ = retry!(||fox.set_min_soc_on_grid(10))?;

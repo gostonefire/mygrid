@@ -1,3 +1,4 @@
+use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local};
@@ -27,7 +28,8 @@ const LAT: f64 = 56.22332313734338;
 const LONG: f64 = 15.658393416666142;
 
 /// Debug mode means no write operations to inverter (except time)
-static mut DEBUG_MODE: bool = false;
+//static mut DEBUG_MODE: bool = false;
+static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
 
 fn main() {
     let mut n_errors = 0;
