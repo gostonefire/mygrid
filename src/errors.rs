@@ -88,6 +88,9 @@ impl From<RoundingError> for MyGridWorkerError {
 impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridWorkerError {
     fn from(e: PoisonError<RwLockReadGuard<'_, bool>>) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
 }
+impl From<SkipError> for MyGridWorkerError {
+    fn from(e: SkipError) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
+}
 
 
 
@@ -166,3 +169,31 @@ impl From<BackupError> for SchedulingError {
         SchedulingError(e.to_string())
     }
 }
+
+
+/// Error depicting errors that occur while doing skip file operations
+///
+pub struct SkipError(String);
+
+impl fmt::Display for SkipError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "SkipError: {}", self.0)
+    }
+}
+impl From<std::io::Error> for SkipError {
+    fn from(e: std::io::Error) -> Self {
+        SkipError(e.to_string())
+    }
+}
+impl From<serde_json::Error> for SkipError {
+    fn from(e: serde_json::Error) -> Self {
+        SkipError(e.to_string())
+    }
+}
+impl From<PoisonError<RwLockReadGuard<'_, bool>>> for SkipError {
+    fn from(e: PoisonError<RwLockReadGuard<'_, bool>>) -> Self { SkipError(e.to_string()) }
+}
+impl From<PoisonError<RwLockWriteGuard<'_, bool>>> for SkipError {
+    fn from(e: PoisonError<RwLockWriteGuard<'_, bool>>) -> Self { SkipError(e.to_string()) }
+}
+

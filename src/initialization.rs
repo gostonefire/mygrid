@@ -13,7 +13,7 @@ use crate::worker::print_schedule;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String), MyGridInitError> {
+pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
         .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
@@ -22,6 +22,8 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String), M
         .expect("Error getting BACKUP_DIR");
     let stats_dir = env::var("STATS_DIR")
         .expect("Error getting STATS_DIR");
+    let skip_file = env::var("SKIP_FILE")
+        .expect("Error getting SKIP_FILE");
     let mail_api_key = env::var("MAIL_API_KEY")
         .expect("Error getting MAIL_PASSWORD");
     let mail_from = env::var("MAIL_FROM")
@@ -60,5 +62,5 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String), M
         print_schedule(&schedule, "Startup", None);
     }
 
-    Ok((fox, nordpool, smhi, schedule, mail, backup_dir, stats_dir))
+    Ok((fox, nordpool, smhi, schedule, mail, backup_dir, stats_dir, skip_file))
 }
