@@ -22,8 +22,8 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String, St
         .expect("Error getting BACKUP_DIR");
     let stats_dir = env::var("STATS_DIR")
         .expect("Error getting STATS_DIR");
-    let skip_file = env::var("SKIP_FILE")
-        .expect("Error getting SKIP_FILE");
+    let manual_file = env::var("MANUAL_FILE")
+        .expect("Error getting MANUAL_FILE");
     let mail_api_key = env::var("MAIL_API_KEY")
         .expect("Error getting MAIL_PASSWORD");
     let mail_from = env::var("MAIL_FROM")
@@ -62,5 +62,5 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Schedule, Mail, String, String, St
         print_schedule(&schedule, "Startup", None);
     }
 
-    Ok((fox, nordpool, smhi, schedule, mail, backup_dir, stats_dir, skip_file))
+    Ok((fox, nordpool, smhi, schedule, mail, backup_dir, stats_dir, manual_file))
 }

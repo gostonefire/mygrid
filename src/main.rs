@@ -20,7 +20,7 @@ mod worker;
 mod errors;
 mod backup;
 mod manager_mail;
-mod skips;
+mod manual;
 
 /// Latitude of the power plant
 const LAT: f64 = 56.22332313734338;
@@ -31,23 +31,23 @@ const LONG: f64 = 15.658393416666142;
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
 
-/// skip day mode means no write operations to inverter (except time)
-static SKIP_DAY: RwLock<bool> = RwLock::new(false);
+/// Manual day mode means no write operations to inverter (except time)
+static MANUAL_DAY: RwLock<bool> = RwLock::new(false);
 
 fn main() {
     let mut n_errors = 0;
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, mut smhi, schedule, gmail, backup_dir, stats_dir, skip_file) = match init() {
-            Ok((f, n, s, sc, g, b, st, sf)) => (f, n, s, sc, g, b, st, sf),
+        let (fox, nordpool, mut smhi, schedule, gmail, backup_dir, stats_dir, manual_file) = match init() {
+            Ok((f, n, s, sc, g, b, st, mf)) => (f, n, s, sc, g, b, st, mf),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
                 continue;
             }
         };
 
-        match run(fox, nordpool, &mut smhi, schedule, &gmail, backup_dir, stats_dir, skip_file) {
+        match run(fox, nordpool, &mut smhi, schedule, &gmail, backup_dir, stats_dir, manual_file) {
             Ok(()) => return,
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&gmail));

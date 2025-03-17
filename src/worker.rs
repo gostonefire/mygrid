@@ -4,14 +4,14 @@ use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike, Dura
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::{retry, wrapper, DEBUG_MODE, SKIP_DAY};
+use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::backup::save_yesterday_statistics;
 use crate::errors::{MyGridWorkerError};
 use crate::manager_mail::Mail;
 use crate::scheduling::{backup_schedule, create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
-use crate::skips::check_skip;
+use crate::manual::check_manual;
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, mail: &Mail, backup_dir: String, stats_dir: String, skip_file: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, mail: &Mail, backup_dir: String, stats_dir: String, manual_file: String)
            -> Result<(), MyGridWorkerError> {
 
     // Main loop that runs once every ten seconds
@@ -24,12 +24,12 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         thread::sleep(std::time::Duration::from_secs(10));
         local_now = Local::now();
 
-        // Check if we should go into skip mode for today
-        if let Some(skip_mode) = check_skip(&skip_file, local_now)? {
-            if skip_mode {
-                print_msg("Skip mode activated for today", "Update", None);
+        // Check if we should go into manual mode for today
+        if let Some(manual_mode) = check_manual(&manual_file, local_now)? {
+            if manual_mode {
+                print_msg("Manual mode activated for today", "Update", None);
             } else {
-                print_msg("Skip mode deactivated for today", "Update", None);
+                print_msg("Manual mode deactivated for today", "Update", None);
             }
         }
 
@@ -160,7 +160,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 /// * 'block' - the configuration to use
 fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting charge block", "Update", None);
-    if is_skip_debug()? {return Ok(Status::Started)}
+    if is_manual_debug()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
     if soc >= block.max_soc {
@@ -194,7 +194,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
     let soc= retry!(||fox.get_current_soc())?;
     if soc >= max_soc {
         print_msg("Setting charge block to full", "Update", None);
-        if is_skip_debug()? {return Ok(Some(Status::Full))}
+        if is_manual_debug()? {return Ok(Some(Status::Full))}
 
         let min_soc = max_soc.max(10).min(100);
 
@@ -226,7 +226,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
 /// * 'max_min_soc' - max min soc allowed for the block
 fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting hold block", "Update", None);
-    if is_skip_debug()? {return Ok(Status::Started)}
+    if is_manual_debug()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
@@ -250,7 +250,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 /// * 'max_min_soc' - max min soc allowed for the block
 fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
     print_msg("Updating hold block", "Update", None);
-    if is_skip_debug()? {return Ok(())}
+    if is_manual_debug()? {return Ok(())}
 
     let soc = retry!(||fox.get_current_soc())?;
     let min_soc = max_min_soc.min(soc).max(10).min(100);
@@ -272,7 +272,7 @@ fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     print_msg("Setting use block", "Update", None);
-    if is_skip_debug()? {return Ok(Status::Started)}
+    if is_manual_debug()? {return Ok(Status::Started)}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
     let _ = retry!(||fox.set_min_soc_on_grid(10))?;
@@ -322,10 +322,10 @@ fn print_msg(message: &str, caption: &str, mail: Option<&Mail>) {
     }
 }
 
-/// Check if we are in debug mode or skip day
+/// Check if we are in debug mode or manual day
 ///
-fn is_skip_debug() -> Result<bool, MyGridWorkerError> {
-    if *DEBUG_MODE.read()? || *SKIP_DAY.read()? {
+fn is_manual_debug() -> Result<bool, MyGridWorkerError> {
+    if *DEBUG_MODE.read()? || *MANUAL_DAY.read()? {
         Ok(true)
     } else {
         Ok(false)
