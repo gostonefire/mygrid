@@ -2,12 +2,14 @@ use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::ops::Add;
+use std::thread;
 use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
 use glob::glob;
 use serde::{Deserialize, Serialize};
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
 use crate::models::smhi_forecast::TimeValues;
+use crate::{retry, wrapper};
 use crate::scheduling::{Schedule};
 
 
@@ -105,7 +107,7 @@ pub fn save_yesterday_statistics(stats_dir: &str, fox: &Fox) -> Result<(), Backu
     let end =  start
         .add(chrono::Duration::days(1))
         .add(chrono::Duration::seconds(-1));
-    let device_history = fox.get_device_history_data(start, end)?;
+    let device_history = retry!(||fox.get_device_history_data(start, end))?;
 
     let file_path = format!("{}{}.csv", stats_dir, device_history.date.format("%Y%m%d"));
 
