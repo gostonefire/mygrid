@@ -32,8 +32,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
             }
         }
 
-        // Check inverter time and save some stats once every day, hour 10 is arbitrary
-        if day_of_year != local_now.ordinal0() && local_now.hour() >= 10 {
+        // Check inverter time and save some stats once every day, hour 15 is arbitrary
+        if day_of_year != local_now.ordinal0() && local_now.hour() >= 15 {
             check_inverter_local_time(&fox)?;
             save_yesterday_statistics(&stats_dir, &fox)?;
             day_of_year = local_now.ordinal0();
