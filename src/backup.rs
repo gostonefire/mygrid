@@ -22,12 +22,6 @@ pub struct BaseData {
     consumption: [f64; 24],
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct State {
-    date_time: DateTime<Local>,
-    block: Block,
-}
-
 /// Saves base data used in the creation of a schedule if time is not in the future
 ///
 /// # Arguments
