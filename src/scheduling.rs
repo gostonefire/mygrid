@@ -1,39 +1,31 @@
-use std::collections::{HashSet};
-use std::{fmt};
+use std::fmt;
 use std::fmt::Formatter;
-use std::ops::Add;
 use std::thread;
-use chrono::{DateTime, Local, TimeDelta, Timelike};
+use chrono::{DateTime, Local, NaiveDate, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
+use crate::production::PVProduction;
+
+use std::collections::HashMap;
+use crate::errors::SchedulingError;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::production::PVProduction;
 use crate::{retry, wrapper, LAT, LONG};
-use crate::backup::save_backup;
-use crate::errors::SchedulingError;
+use crate::backup::save_base_data;
 
-/// Time needed to fully charge batteries from SoC 10% to SoC 100%
-const CHARGE_LEN: u8 = 3;
+const BAT_CAPACITY: f64 = 16590.0 / 1000.0;
+const BAT_KWH: f64 = BAT_CAPACITY * 0.9;
+pub const SOC_KWH: f64 = BAT_CAPACITY / 100.0;
+const CHARGE_KWH_HOUR: f64 = 6.0;
+const CHARGE_EFFICIENCY: f64 = 0.9;
+const DISCHARGE_EFFICIENCY: f64 = 0.9;
+const SELL_PRIORITY: f64 = 0.0;
 
-/// Time available in batteries to supply power when in self use mode
-const USE_LEN: u8 = 5;
-
-/// The battery capacity in watts divided by the max SoC (State of Charge). This represents
-/// roughly how much each percentage of the SoC is in terms of power (Wh)
-const SOC_CAPACITY_W: f64 = 16590.0 / 100.0;
-
-/// The inverter round-trip efficiency.
-/// If a charge price is x, then the discharge tariff must be equal or higher
-/// than x / INVERTER_EFFICIENCY
-const INVERTER_EFFICIENCY: f64 = 0.8;
-
-/// The min tariff price an hour must meet or exceed for it to be part of a use block
-/// regardless of tariff price during battery charging. This to avoid chasing mosquito with
-/// an elephant gun, better save battery from charge cycles if it doesn't give money back.
-const MIN_USE_TARIFF: f64 = 0.5;
-
-
+#[derive(Serialize, Deserialize, Clone)]
+struct Tariffs {
+    buy: [f64;24],
+    sell: [f64;24],
+}
 
 /// Available block types
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +69,7 @@ impl fmt::Display for Status {
     }
 }
 
+/*
 /// Represents one block in a schedule
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
@@ -90,41 +83,83 @@ pub struct Block {
     pub is_updated: bool,
     pub status: Status,
 }
+*/
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Block {
+    pub block_type: BlockType,
+    pub date: NaiveDate,
+    pub start_hour: usize,
+    pub end_hour: usize,
+    size: usize,
+    pub charge_tariff_in: f64,
+    pub charge_tariff_out: f64,
+    pub price: f64,
+    pub charge_in: f64,
+    pub charge_out: f64,
+    pub overflow: f64,
+    pub overflow_price: f64,
+    pub soc_in: usize,
+    pub soc_out: usize,
+    pub status: Status,
+}
 
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        // Divide all prices in chunks of max 8 prices
-        let price_chunks: Vec<Vec<f64>> = self.hour_price
-            .chunks(8)
-            .map(|c| c.to_vec())
-            .collect();
 
         // Build base output
-        let mut output = format!("{} - {} -> {:>2} - {:>2}: maxMinSoc {:<3}, maxSoc {:<3}, updated: {:>5}, price {:<7.3} ",
-                                 self.status, self.block_type, self.start_hour, self.end_hour,
-                                 self.max_min_soc, self.max_soc, self.is_updated, self.mean_price);
-
-        // Build and attach text line for each chunk to the output string
-        let chunks = &mut price_chunks.iter().enumerate();
-        while let Some((i, chunk)) = chunks.next() {
-            let mut line = "[".to_string();
-            for price in chunk {
-                line.push_str(&format!("{:>6.2}", price));
-            }
-            line.push_str(" ]");
-
-            // First line should follow immediately after the base output, rest of lines
-            // shall start after 70 spaces from beginning
-            if i == 0 {
-                output.push_str(&line);
-            } else {
-                output.push_str(&format!("\n{:>86}{}", "", line));
-            }
-        }
+        let output = format!("{} - {} -> {:>2} - {:>2}: SocIn {:>3}, SocOut {:>3}, chargeIn {:>5.2}, chargeOut {:>5.2}, chargeTariffIn {:>5.2}, chargeTariffOut {:>5.2}, overflow {:>5.2}, overflowPrice {:>5.2}, price {:>5.2} ",
+                                 self.status, self.block_type,
+                                 self.start_hour, self.end_hour,
+                                 self.soc_in, self.soc_out,
+                                 self.charge_in, self.charge_out,
+                                 self.charge_tariff_in, self.charge_tariff_out,
+                                 self.overflow, self.overflow_price,
+                                 self.price);
 
         write!(f, "{}", output)
     }
+}
+
+impl Block {
+    /// Returns true if the block is active in relation to date and time
+    ///
+    /// # Arguments
+    ///
+    /// * 'date_time' - the date time the block is valid for
+    pub fn is_active(&self, date_time: DateTime<Local>) -> bool {
+        let date = date_time.date_naive();
+        let hour = date_time.hour() as usize;
+
+        self.date == date && hour >= self.start_hour && hour <= self.end_hour
+    }
+
+    /// Returns true if the block is a started charge block and not prematurely stopped
+    ///
+    pub fn is_charge(&self) -> bool {
+        self.block_type == BlockType::Charge && self.status == Status::Started
+    }
+
+    /// Updates a block with a new status
+    ///
+    /// # Arguments
+    ///
+    /// * 'status' - the status to update with
+    pub fn update_block_status(&mut self, status: Status) {
+        self.status = status;
+    }
+}
+
+#[derive(Clone)]
+struct Blocks {
+    schedule_id: u32,
+    blocks: Vec<Block>,
+    next_start: usize,
+    next_charge_in: f64,
+    next_charge_tariff_in: f64,
+    next_soc_in: usize,
+    total_price: f64,
 }
 
 /// Struct representing one day's block schedule
@@ -132,485 +167,576 @@ impl fmt::Display for Block {
 pub struct Schedule {
     pub date: DateTime<Local>,
     pub blocks: Vec<Block>,
-    pub tariffs: [f64;24],
+    tariffs: Tariffs,
 }
 
 impl Schedule {
-    /// Creates a new empty schedule with its date set to yesterday
-    pub fn new() -> Schedule {
-        Schedule {
-            date: Local::now().add(TimeDelta::days(-1)),
-            blocks: Vec::new(),
-            tariffs: [0.0; 24],
-        }
-    }
-
-    /// Creates a schedule over one day given that days tariffs.
-    ///
-    /// It divides the day over three segments and finds the best block for charging
-    /// that also has a suitable use block. If none is found in segment one it continues to
-    /// search in segment 2 and finally in segment three.
-    ///
-    /// Depending on how many use blocks were found after a charge block it either tries to find a new
-    /// charge block with open end to end of day, or a charge block between two use blocks.
+    /// Creates a new schedule based on tariffs, production and consumption estimates.
+    /// It can also base the schedule on any residual charge and its mean charge tariff carrying in
+    /// from a previous schedule or from the inverter itself (in which case it might be hard to determine
+    /// the mean charge tariff).
     ///
     /// # Arguments
     ///
-    /// * 'tariffs' - tariffs from NordPool for the day to create schedule for
-    /// * 'date_time' - date and time to stamp the schedule with
-    pub fn from_tariffs(tariffs: &Vec<f64>, date_time: DateTime<Local>) -> Result<Schedule, SchedulingError> {
-        let mut schedule = Schedule { date: date_time, blocks: Vec::new(), tariffs: [0.0;24] };
-        schedule.tariffs_to_array(tariffs)?;
+    /// * 'start' - start hour for the schedule to be created
+    /// * 'tariffs' - tariffs as given from NordPool
+    /// * 'production' - production estimates per hour
+    /// * 'consumption' - consumption estimates per hour
+    /// * 'charge_in' - any residual charge to bear in to the new schedule
+    /// * 'charge_tariff_in' - the mean price for the residual price
+    /// * 'date_time' - the date time to stamp on the schedule
+    pub fn new_with_scheduling(start: usize, tariffs: &Vec<f64>, production: &PVProduction, consumption: &Consumption, charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Schedule {
+        let prod = production.get_production();
+        let cons = consumption.get_consumption();
+        let mut net_prod: [f64;24] = [0.0;24];
+        prod.iter()
+            .enumerate()
+            .for_each(|(i, &p)| net_prod[i] = (p - cons[i]) / 1000.0);
 
-        let segments: [(u8,u8);3] = [(0,8 - CHARGE_LEN), (8, 16 - CHARGE_LEN), (16, 24 - CHARGE_LEN)];
+        let tariffs = split_tariffs(&tariffs);
 
-        // Find the best charge block with following use block(s) where mean price for a use block is
-        // at least 25% more expensive (to factor in inverter/battery efficiency factor of
-        // roughly 80% efficiency full circle). The day is divided in three segments, but only
-        // the charge block is affected by that boundary.
-        let mut blocks: Vec<Block> = Vec::new();
-        for s in segments.iter() {
-            let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, s.0, s.1);
-            let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
-            blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
-            if !blocks.is_empty() {
-                schedule.blocks.push(charge_block);
-                schedule.blocks.push(blocks[0].clone());
+        let blocks = seek_best(start, &tariffs, net_prod, charge_in, charge_tariff_in, date_time);
+
+        Schedule {
+            date: date_time,
+            blocks: blocks.blocks,
+            tariffs,
+        }
+    }
+
+    /// Updates a block identified by its running hours
+    ///
+    /// # Arguments
+    ///
+    /// * 'hour' - hour to identify block with
+    /// * 'status' - the status to update with
+    pub fn update_block_status(&mut self, hour: usize, status: Status) {
+        for b in self.blocks.iter_mut() {
+            if b.status == Status::Waiting && b.start_hour <= hour && b.end_hour >= hour {
+                b.status = status;
+                return;
+            }
+        }
+    }
+
+    /// Returns a clone of a block identified by hour
+    ///
+    /// # Arguments
+    ///
+    /// * 'hour' - the hour to get a block for
+    pub fn get_block(&self, hour: usize) -> Result<Block, SchedulingError> {
+        for b in self.blocks.iter() {
+            if b.start_hour <= hour && b.end_hour >= hour {
+                return Ok(b.clone());
+            }
+        }
+
+        Err(SchedulingError(format!("no block in schedule corresponding to hour {}", hour)))
+    }
+}
+
+/// Seeks the best schedule given input parameters.
+/// The algorithm searches through all combinations of charge blocks, use blocks and charge levels
+/// and returns the one with the best price (i.e. the mean price for usage minus the price for charging).
+/// It also considers charge input from PV, which not only tops up batteries but also lowers the
+/// mean price for the stored energy, which in turn can be used for even lower hourly tariffs.
+///
+/// # Arguments
+///
+/// * 'start' - start hour for the schedule to be created
+/// * 'tariffs' - tariffs as given from NordPool but marked up with VAT, fees and other price components
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'charge_in' - any residual charge to bear in to the new schedule
+/// * 'charge_tariff_in' - the mean price for the residual price
+/// * 'date_time' - the date to stamp on the block
+fn seek_best(start: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Blocks {
+    let mut schedule_id: u32 = 0;
+    let mut record: HashMap<usize, Blocks> = create_base_blocks(schedule_id, charge_in, charge_tariff_in, &tariffs, net_prod, date_time);
+
+    for seek_first_charge in start..23 {
+        for charge_level_first in 0..=90 {
+            schedule_id += 1;
+
+            let first_charge_blocks = seek_charge(start, seek_first_charge, charge_level_first, &tariffs, net_prod, charge_in, charge_tariff_in, date_time);
+            for seek_first_use in first_charge_blocks.next_start..24 {
+
+                if let Some(first_use_blocks) = seek_use(schedule_id, first_charge_blocks.next_start, seek_first_use, &tariffs, net_prod, first_charge_blocks.next_charge_in, first_charge_blocks.next_charge_tariff_in, date_time) {
+                    let first_combined = combine_blocks(&first_charge_blocks, &first_use_blocks);
+                    record_best(1, &first_combined, &tariffs, net_prod, &mut record, date_time);
+
+                    for seek_second_charge in first_combined.next_start..23 {
+                        for charge_level_second in 0..=90 {
+                            schedule_id += 1;
+
+                            let second_charge_blocks = seek_charge(first_combined.next_start, seek_second_charge, charge_level_second, &tariffs, net_prod, first_combined.next_charge_in, first_combined.next_charge_tariff_in, date_time);
+                            for seek_second_use in second_charge_blocks.next_start..24 {
+
+                                if let Some(second_use_blocks) = seek_use(schedule_id, second_charge_blocks.next_start, seek_second_use, &tariffs, net_prod, second_charge_blocks.next_charge_in, second_charge_blocks.next_charge_tariff_in, date_time) {
+                                    let second_combined = combine_blocks(&second_charge_blocks, &second_use_blocks);
+                                    let all_combined = combine_blocks(&first_combined, &second_combined);
+                                    record_best(2, &all_combined, &tariffs, net_prod, &mut record, date_time);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    get_best(&record)
+}
+
+/// Returns the best block from what has been recorded for various levels
+///
+/// # Arguments
+///
+/// * 'record' - the record of the best Blocks structs saved so far
+fn get_best(record: &HashMap<usize, Blocks>) -> Blocks {
+    let mut best_total: f64 = -10000.0;
+    let mut best_level: usize = 0;
+    for l in record.keys() {
+        if record[l].total_price > best_total {
+            best_total = record[l].total_price;
+            best_level = *l;
+        }
+    }
+
+    let mut best_block = record[&best_level].clone();
+    for ib in best_block.blocks.iter_mut() {
+        ib.end_hour = ib.start_hour + ib.size - 1;
+    }
+
+    best_block
+}
+
+/// Creates an initial base block as a backstop if the search doesn't find any charge/use
+/// opportunities.
+///
+/// # Arguments
+///
+/// * 'schedule_id' - an id that can be later used if some debugging is needed
+/// * 'charge_in' - residual charge from previous block (or from previous day)
+/// * 'charge_tariff_in' - mean tariff for residual charge
+/// * 'tariffs' - tariffs (both buy and sell tariffs will be used) inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'date_time' - the date to stamp on the block
+fn create_base_blocks(schedule_id: u32, charge_in: f64, charge_tariff_in: f64, tariffs: &Tariffs, net_prod: [f64;24], date_time: DateTime<Local>) -> HashMap<usize, Blocks> {
+    let mut record: HashMap<usize, Blocks> = HashMap::new();
+
+    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Use, 0, 24, tariffs, net_prod, charge_in, charge_tariff_in);
+
+    let block = Block {
+        block_type: BlockType::Use,
+        date: date_time.date_naive(),
+        start_hour: 0,
+        end_hour: 23,
+        size: 24,
+        charge_tariff_in,
+        charge_tariff_out,
+        price: 0.0,
+        charge_in,
+        charge_out,
+        overflow,
+        overflow_price: 0.0,
+        soc_in: 10 + (charge_in / SOC_KWH).round().min(90.0) as usize,
+        soc_out: 10 + (charge_out / SOC_KWH).round().min(90.0) as usize,
+        status: Status::Waiting,
+    };
+
+    record.insert(0,Blocks {
+        schedule_id,
+        next_start: 24,
+        next_charge_in: block.charge_out,
+        next_charge_tariff_in: block.charge_tariff_out,
+        next_soc_in: block.soc_out,
+        total_price: block.price,
+        blocks: vec![block],
+    });
+
+    record
+}
+
+/// Trims out any blocks with zero size (they are just artifacts from the search flow).
+/// Also, it makes sure that we fill any empty tail with a suitable hold block
+///
+/// # Arguments
+///
+/// * 'blocks' - the Blocks struct to trim and add tail to
+/// * 'tariffs' - tariffs inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'date_time' - the date to stamp on the block
+fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_time: DateTime<Local>) -> Blocks {
+    let mut result = blocks.clone();
+
+    // Trim blocks with no length
+    result.blocks = result.blocks.iter().filter(|b| b.size > 0).cloned().collect::<Vec<Block>>();
+
+    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Hold, result.next_start, 24, tariffs, net_prod, result.next_charge_in, result.next_charge_tariff_in);
+
+    if result.next_start < 24 {
+        result.blocks.push({
+            Block {
+                block_type: BlockType::Hold,
+                date: date_time.date_naive(),
+                start_hour: result.next_start,
+                end_hour: 0,
+                size: 24 - result.next_start,
+                charge_tariff_in: result.next_charge_tariff_in,
+                charge_tariff_out,
+                price: 0.0,
+                charge_in: result.next_charge_in,
+                charge_out,
+                overflow,
+                overflow_price: 0.0,
+                soc_in: result.next_soc_in,
+                soc_out: 10 + (charge_out / SOC_KWH).round().min(90.0) as usize,
+                status: Status::Waiting,
+            }
+        });
+        result.next_start = 24;
+        result.next_charge_in = charge_out;
+        result.next_charge_tariff_in = charge_tariff_out;
+        result.next_soc_in = 10 + (charge_out / SOC_KWH).round().min(90.0) as usize;
+    }
+    result
+}
+
+/// Combines two Blocks struct into one to get a complete day schedule
+///
+/// # Arguments
+///
+/// * 'blocks_one' - a blocks struct from a level one search
+/// * 'blocks_two' - a blocks struct from a subsequent level two search
+fn combine_blocks(blocks_one: &Blocks, blocks_two: &Blocks) -> Blocks {
+    let mut combined = Blocks {
+        schedule_id: blocks_two.schedule_id,
+        blocks: blocks_one.blocks.clone(),
+        next_start: blocks_two.next_start,
+        next_charge_in: blocks_two.next_charge_in,
+        next_charge_tariff_in: blocks_two.next_charge_tariff_in,
+        next_soc_in: blocks_two.next_soc_in,
+        total_price: blocks_one.total_price + blocks_two.total_price,
+    };
+    combined.blocks.extend(blocks_two.blocks.clone());
+
+    combined
+}
+
+/// Saves the given Blocks struct if the total price is better than any stored for the level
+///
+/// # Arguments
+///
+/// * 'level' - level is 1 or 2 and indicates whether it is a first search result or a combined 2 step search
+/// * 'blocks' - the Blocks struct to check and potentially save as the best for its level
+/// * 'tariffs' - tariffs inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'record' - the record of the best Blocks structs saved so far
+/// * 'date_time' - the date to stamp on the block
+fn record_best(level: usize, blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], record: &mut HashMap<usize, Blocks>, date_time: DateTime<Local>) {
+    if let Some(recorded_blocks) = record.get(&level) {
+        if blocks.total_price > recorded_blocks.total_price {
+            record.insert(level, trim_and_tail(blocks, tariffs, net_prod, date_time));
+        }
+    } else {
+        record.insert(level, trim_and_tail(blocks, tariffs, net_prod, date_time));
+    }
+}
+
+/// Seeks a use block
+///
+/// # Arguments
+///
+/// * 'schedule_id' - an id that can be later used if some debugging is needed
+/// * 'initial_start' - the initial start is used to calculate for a hold block prepending the charge block to bee
+/// * 'seek_start' - where this run is supposed to start its search
+/// * 'tariffs' - tariffs (both buy and sell tariffs will be used) inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'charge_in' - residual charge from previous block
+/// * 'charge_tariff_in' - mean tariff for residual charge
+/// * 'date_time' - the date to stamp on the block
+fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Option<Blocks> {
+
+    for u_start in seek_start..24 {
+        // for the hold phase
+        let (hold_charge_out, hold_charge_tariff_out, hold_overflow, hold_overflow_price) = update_for_pv(BlockType::Hold, initial_start, u_start, tariffs, net_prod, charge_in, charge_tariff_in);
+        let hold = Block {
+            block_type: BlockType::Hold,
+            date: date_time.date_naive(),
+            start_hour: initial_start,
+            end_hour: 0,
+            size: u_start - initial_start,
+            charge_tariff_in,
+            charge_tariff_out: hold_charge_tariff_out,
+            price: 0.0,
+            charge_in,
+            charge_out: hold_charge_out,
+            overflow: hold_overflow,
+            overflow_price: hold_overflow_price,
+            soc_in: 10 + (charge_in / SOC_KWH).round().min(90.0) as usize,
+            soc_out: 10 + (hold_charge_out / SOC_KWH).round().min(90.0) as usize,
+            status: Status::Waiting,
+        };
+        let mut charge_out:f64 = hold_charge_out;
+        let mut charge_tariff_out:f64 = hold_charge_tariff_out;
+        let mut overflow:f64 = hold_overflow;
+        let mut overflow_price:f64 = hold_overflow_price;
+        for u_end in u_start..=24 {
+            if u_end > 23 || tariffs.buy[u_end] <= charge_tariff_out {
+                if u_end != u_start {
+                    return Some(get_use_blocks(schedule_id, u_start, u_end, charge_out, charge_tariff_out, overflow, overflow_price, hold, tariffs, net_prod, date_time));
+                }
+                break;
+            }
+
+            (charge_out, charge_tariff_out, overflow, overflow_price) = update_for_pv(BlockType::Use, u_start, u_end+1, tariffs, net_prod, hold_charge_out, hold_charge_tariff_out);
+
+            if charge_out.round() == 0.0 {
+                if u_end != u_start {
+                    return Some(get_use_blocks(schedule_id, u_start, u_end + 1, charge_out, charge_tariff_out, overflow, overflow_price, hold, tariffs, net_prod, date_time));
+                }
                 break;
             }
         }
-
-        // If we did find a charge block followed by use block(s) we continue to find more charge block
-        // with following use block(s).
-        while !blocks.is_empty() {
-            // If there was only one use block found, we try to find a new charge block with open end
-            // to end of day, with following use block(s)
-            if blocks.len() == 1 {
-                let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, blocks[0].end_hour + 1, 23);
-                let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
-                blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
-                if !blocks.is_empty() {
-                    schedule.blocks.push(charge_block);
-                    schedule.blocks.push(blocks[0].clone());
-                }
-            // If there are more than one use block found we try to squeeze a charge block in between,
-            // and if that is not possible we instead choose the best of the two first use blocks
-            } else if blocks.len() >= 1 {
-                let charge_block = Self::get_charge_block(&tariffs, CHARGE_LEN, blocks[0].end_hour + 1, blocks[1].start_hour - 1);
-                let min_price = (charge_block.mean_price / INVERTER_EFFICIENCY).max(MIN_USE_TARIFF);
-                let new_blocks = Self::get_use_block(&tariffs, min_price, USE_LEN, charge_block.end_hour + 1, 23);
-                if !new_blocks.is_empty() {
-                    schedule.blocks.push(charge_block);
-                    schedule.blocks.push(new_blocks[0].clone());
-                } else if blocks[1].mean_price > blocks[0].mean_price {
-                    schedule.blocks.pop();
-                    schedule.blocks.push(blocks[1].clone());
-                }
-                blocks = new_blocks;
-            }
-        }
-
-        Ok(Self::add_hold_blocks(schedule, tariffs).tariffs_to_array(tariffs)?)
     }
 
-    /// Updates the schedule with charge levels for the charge blocks, i.e. what
-    /// maxSoC should be given the estimated production and consumption following the charge
-    ///
-    /// The logic also ensures that a previous maxSoC can't be higher than a following since
-    /// that would in theory mean that there will not be enough room for PV power later
-    /// in the day (the battery SoC is potentially already over the following hours setting).
-    ///
-    /// # Arguments
-    ///
-    /// * 'production' - estimated production in watts per hour
-    /// * 'consumption' - estimated consumption in watts per hour
-    /// * 'is_update' - whether this is an update to a new schedule or not
-    pub fn update_charge_levels(&mut self, production: &PVProduction, consumption: &Consumption, is_update: bool) {
-        let mut min_max_soc: u8 = 100;
-        for b in (0..(self.blocks.len() - 1)).rev() {
-            if self.blocks[b].block_type == BlockType::Charge {
-                let mut selected_hours: Vec<u8> = Vec::new();
-                for b2 in (b + 1)..self.blocks.len() {
-                    if self.blocks[b2].block_type == BlockType::Charge {
-                        break;
-                    }
-                    for h in self.blocks[b2].start_hour..=self.blocks[b2].end_hour {
-                        selected_hours.push(h);
-                    }
-                }
-                let charge_level = Self::get_charge_level(selected_hours, &production, &consumption);
-                min_max_soc = min_max_soc.min(charge_level);
-                if self.blocks[b].max_soc != min_max_soc && is_update {
-                    self.blocks[b].is_updated = true;
-                }
-                self.blocks[b].max_soc = min_max_soc;
-            }
-        }
-        let day_charge_level = Self::get_charge_level((0..24).collect::<Vec<u8>>(), &production, &consumption);
-        self.update_max_min_soc(day_charge_level, is_update);
+    None
+}
+
+/// Creates a charge block
+///
+/// # Arguments
+///
+/// * 'start' - the charge block starting hour
+/// * 'size' - length of charge block
+/// * 'charge_in' - residual charge from previous block
+/// * 'charge_tariff_in' - mean tariff for residual charge
+/// * 'charge_out' - charge out after charging
+/// * 'charge_tariff_out' - mean tariff for charge in charge block
+/// * 'price' - the price, or cost, for charging
+/// * 'date_time' - the date to stamp on the block
+fn get_charge_block(start: usize, size: usize, charge_in: f64, charge_tariff_in: f64, charge_out: f64, charge_tariff_out: f64, price: f64, date_time: DateTime<Local>) -> Block {
+    Block {
+        block_type: BlockType::Charge,
+        date: date_time.date_naive(),
+        start_hour: start,
+        end_hour: 0,
+        size,
+        charge_tariff_in,
+        charge_tariff_out,
+        price,
+        charge_in,
+        charge_out,
+        overflow: 0.0,
+        overflow_price: 0.0,
+        soc_in: 10 + (charge_in / SOC_KWH).round().min(90.0) as usize,
+        soc_out: 10 + (charge_out / SOC_KWH).round().min(90.0) as usize,
+        status: Status::Waiting,
     }
+}
 
-    /// Updates max minSoC for all non-charge blocks
-    /// This to avoid setting a too high min soc on grid for a hold block if a previous
-    /// block has been pushed higher than charge max soc (which reflects the wiggle room
-    /// for PV power given production/consumption estimates)
-    ///
-    /// # Arguments
-    ///
-    /// * 'day_charge_level' - the charge level for the entire day
-    /// * 'is_update' - whether this is an update to a new schedule or not
-    fn update_max_min_soc(&mut self, day_charge_level: u8, is_update: bool) {
-        if self.blocks.len() == 1 {
-            if self.blocks[0].max_min_soc != day_charge_level && is_update {
-                self.blocks[0].is_updated = true;
-            }
-            self.blocks[0].max_min_soc = day_charge_level;
-        } else {
-            let mut last_max_min_soc: u8 = 100;
-            for b in 0..self.blocks.len() {
-                if self.blocks[b].block_type == BlockType::Charge {
-                    last_max_min_soc = self.blocks[b].max_soc;
-                } else {
-                    if self.blocks[b].max_min_soc != last_max_min_soc && is_update {
-                        self.blocks[b].is_updated = true;
-                    }
-                    self.blocks[b].max_min_soc = last_max_min_soc;
-                }
-            }
-        }
+/// Creates a use Blocks struct
+///
+/// # Arguments
+///
+/// * 'schedule_id' - an id that can be later used if some debugging is needed
+/// * 'u_start' - the use block starting hour
+/// * 'e_end' - the use block end hour (non-inclusive)
+/// * 'charge_out' - residual charge from use block to create
+/// * 'charge_tariff_out' - mean tariff for residual charge from the use block
+/// * 'overflow' - overflow from the use block to create
+/// * 'overflow_price' - price for the overflow from the use block
+/// * 'hold' - the hold block between the charge and use block
+/// * 'tariffs' - tariffs (buy tariffs used here) inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'date_time' - the date to stamp on the block
+fn get_use_blocks(schedule_id: u32, u_start: usize, u_end: usize, charge_out: f64, charge_tariff_out: f64, overflow: f64, overflow_price: f64, hold: Block, tariffs: &Tariffs, net_prod: [f64;24], date_time: DateTime<Local>) -> Blocks {
+    let u_price = net_prod[u_start..u_end].iter()
+        .zip(tariffs.buy[u_start..u_end].iter())
+        .map(|(&np, &t)| np.min(0.0).abs()*t).sum::<f64>();
+
+    let usage = Block {
+        block_type: BlockType::Use,
+        date: date_time.date_naive(),
+        start_hour: u_start,
+        end_hour: 0,
+        size: u_end - u_start,
+        charge_tariff_in: hold.charge_tariff_out,
+        charge_tariff_out,
+        price: u_price,
+        charge_in: hold.charge_out,
+        charge_out,
+        overflow,
+        overflow_price,
+        soc_in: hold.soc_out,
+        soc_out: 10 + (charge_out / SOC_KWH).round().min(90.0) as usize,
+        status: Status::Waiting,
+    };
+
+    Blocks {
+        schedule_id,
+        next_start: usage.start_hour + usage.size,
+        next_charge_in: usage.charge_out,
+        next_charge_tariff_in: usage.charge_tariff_out,
+        next_soc_in: usage.soc_out,
+        total_price: hold.price + hold.overflow_price + usage.price + usage.overflow_price,
+        blocks: vec![hold, usage],
     }
+}
 
-    /// Updates block status for those blocks still in waiting but passed time
-    ///
-    pub fn update_status(mut self) -> Self {
-        let local_now = Local::now();
+/// Gets charge (and leading hold) block
+///
+/// # Arguments
+///
+/// * 'initial_start' - the initial start is used to calculate for a hold block prepending the charge block to bee
+/// * 'start' - start hour for the proposed charge block
+/// * 'soc_level' - the state of charge (SoC) to target the charge block for, it is given from 0-90 (10% is always reserved in the battery)
+/// * 'tariffs' - tariffs (sell tariffs used here) inc VAT and extra
+/// * 'net_prod' - the net production (production minus consumption) per hour
+/// * 'charge_in' - residual charge from previous block
+/// * 'charge_tariff_in' - mean tariff for residual charge
+/// * 'date_time' - the date to stamp on the block
+fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Blocks {
 
-        if local_now.timestamp() >= self.date.timestamp() {
-            let now = local_now.hour() as u8;
+    let (hold_charge_out, hold_charge_tariff_out, overflow, overflow_price) = update_for_pv(BlockType::Hold, initial_start, start, tariffs, net_prod, charge_in, charge_tariff_in);
+    let hold = Block {
+        block_type: BlockType::Hold,
+        date: date_time.date_naive(),
+        start_hour: initial_start,
+        end_hour: 0,
+        size: start - initial_start,
+        charge_tariff_in,
+        charge_tariff_out: hold_charge_tariff_out,
+        price: 0.0,
+        charge_in,
+        charge_out: hold_charge_out,
+        overflow,
+        overflow_price,
+        soc_in: 10 + (charge_in / SOC_KWH).round().min(90.0) as usize,
+        soc_out: 10 + (hold_charge_out / SOC_KWH).round().min(90.0) as usize,
+        status: Status::Waiting,
+    };
 
-            for s in self.blocks.iter_mut() {
-                if s.end_hour < now && s.status == Status::Waiting {
-                    s.status = Status::Missed;
-                }
-            }
+    let mut hourly_charge: Vec<f64> = Vec::new();
+
+    let need = (soc_level as f64 * SOC_KWH - hold_charge_out) / CHARGE_EFFICIENCY;
+    let charge: Block = if need > 0.0 {
+        let rem = need % CHARGE_KWH_HOUR;
+
+        (0..(need / CHARGE_KWH_HOUR) as usize).for_each(|_|hourly_charge.push(CHARGE_KWH_HOUR));
+        if (rem * 10.0).round() as usize != 0 {
+            hourly_charge.push(rem);
         }
-        self
-    }
-
-    /// Returns the index of the next block that is ready to start, or None if none found
-    ///
-    /// # Arguments
-    ///
-    /// * 'hour' - the hour to check for
-    pub fn get_eligible_for_start(&self, hour: u8) -> Option<usize> {
-        for (i, b) in self.blocks.iter().enumerate() {
-            if b.status == Status::Waiting && b.start_hour <= hour && b.end_hour >= hour {
-                return Some(i);
-            }
-        }
-
-        None
-    }
-
-    /// Returns, if any, the index of a running charge block with status Started
-    ///
-    /// # Arguments
-    ///
-    /// * 'hour' - the hour to check for
-    pub fn get_current_started_charge(&self, hour: u8) -> Option<usize> {
-        for (i, _) in self.blocks
-            .iter()
+        let end = (start + hourly_charge.len()).min(24);
+        let c_price = tariffs.buy[start..end].iter()
             .enumerate()
-            .filter(|(_, b)| {
-                b.block_type == BlockType::Charge && b.status == Status::Started && b.start_hour <= hour && b.end_hour >= hour
-            }) {
-            return Some(i);
-        }
+            .map(|(i, t)| hourly_charge[i] * t)
+            .sum::<f64>();
 
-        None
+        let c_this_mean = c_price / need;
+        let c_mean = need / (need + hold_charge_out) * c_this_mean + hold_charge_out / (need + hold_charge_out) * hold_charge_tariff_out;
+
+        get_charge_block(start, end - start, hold_charge_out, hold_charge_tariff_out, hold_charge_out + need, c_mean, c_price, date_time)
+
+    } else {
+        get_charge_block(start, 0, hold_charge_out, hold_charge_tariff_out, hold_charge_out, hold_charge_tariff_out, 0.0, date_time)
+    };
+
+    Blocks {
+        schedule_id: 0,
+        next_start: charge.start_hour + charge.size,
+        next_charge_in: charge.charge_out,
+        next_charge_tariff_in: charge.charge_tariff_out,
+        next_soc_in: charge.soc_out,
+        total_price: hold.price + hold.overflow_price - charge.price,
+        blocks: vec![hold, charge],
+    }
+}
+
+/// Updates stored charges and how addition from PV (free electricity) effects the mean price for the stored charge.
+/// Also, it breaks out any overflow, i.e. charge that exceeds the battery maximum, and the sell price for that overflow
+///
+/// # Arguments
+///
+/// * 'block_type' - The block type which is used to indicate how to deal with periods of net consumption
+/// * 'start' - block start hour
+/// * 'end' - block end hour (non-inclusive)
+/// * 'tariffs' - tariffs (sell tariffs used here) inc VAT and extra
+/// * 'net_prod' - production minus consumption per hour
+/// * 'charge_in' - residual charge from previous block
+/// * 'charge_tariff_in' - mean tariff for residual charge
+fn update_for_pv(block_type: BlockType, start: usize, end: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64) -> (f64, f64, f64, f64) {
+    let mut hold_level: f64 = 0.0;
+    if block_type == BlockType::Hold {
+        hold_level = charge_in;
     }
 
-    /// Returns block index if the block meets stated conditions
-    ///
-    /// # Arguments
-    ///
-    /// * 'hour' - the hour to check for
-    /// * 'block_type' - a list of block types
-    /// * 'conditions' - a list of BlockType Status tuples
-    pub fn get_conditional(&self, hour: u8, conditions: Vec<(&BlockType, &Status)>) -> Option<usize> {
-        for (i, _) in self.blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| {
-                b.start_hour <= hour && b.end_hour >= hour && conditions.contains(&(&b.block_type, &b.status))
-                //block_type.contains(&b.block_type) && status.contains(&b.status) && b.start_hour <= hour && b.end_hour >= hour
-            }) {
-            return Some(i);
-        }
-
-        None
-    }
-
-    /// Returns a clone of a block identified by its index
-    ///
-    /// # Arguments
-    ///
-    /// * 'block_idx' - index of the block to return
-    pub fn get_block_clone(&self, block_idx: usize) -> Option<Block> {
-        if block_idx < self.blocks.len() {
-            Some(self.blocks[block_idx].clone())
-        } else {
-            None
-        }
-    }
-
-    /// Updates a block identified by its index with a new status
-    ///
-    /// # Arguments
-    ///
-    /// * 'block_idx' - index of block to update
-    /// * 'status' - the status to update with
-    pub fn update_block_status(&mut self, block_idx: usize, status: Status) -> Result<(), SchedulingError>{
-        if block_idx < self.blocks.len() {
-            self.blocks[block_idx].status = status;
-            Ok(())
-        } else {
-            Err(SchedulingError(format!("block index {} not found", block_idx)))
-        }
-    }
-
-    /// Resets the is updated flag for a block identified by its index
-    ///
-    /// # Arguments
-    ///
-    /// * 'block_idx' - index of block to reset
-    pub fn reset_is_updated(&mut self, block_idx: usize) {
-        self.blocks[block_idx].is_updated = false;
-    }
-
-    /// Get charge level for a given day and selected hours.
-    ///
-    /// # Arguments
-    ///
-    /// * 'selected_hours' - hours of the date to include in calculation
-    /// * 'production' - struct containing estimated hourly production levels
-    /// * 'consumption' - struct containing estimated hourly load levels
-    fn get_charge_level(selected_hours: Vec<u8>, production: &PVProduction, consumption: &Consumption) -> u8 {
-        let segment = production.get_production()
-            .iter().enumerate()
-            .filter(|(h, _)| selected_hours.contains(&(*h as u8)))
-            .map(|(h, &p)|
-                 p - consumption.get_hour_consumption(h)
-            )
-            .filter(|&sc| sc > 0.0)
-            .fold((0usize, 0.0f64), |acc, el| (acc.0 + 1, acc.1 + el));
-
-        let charge_level: u8;
-        if segment.0 == 0 {
-            charge_level = 100;
-        } else {
-            charge_level = (100.0 - segment.1 / SOC_CAPACITY_W).floor() as u8;
-        }
-
-        if charge_level != 100 {
-            charge_level.min(95)
-        } else {
-            100
-        }
-    }
-
-    /// Adds hold blocks where there are no charge- or use blocks. Hold blocks tells the inverter to
-    /// hold minimum charge att whatever SoC the previous block left with.
-    ///
-    /// # Arguments
-    ///
-    /// * 'schedule' - the schedule to fill hold blocks to
-    /// * 'tariffs' - used to fill in mean price also for hold blocks
-    fn add_hold_blocks(schedule: Schedule, tariffs: &Vec<f64>) -> Schedule {
-        let mut new_schedule = Schedule { date: schedule.date, blocks: Vec::new(), tariffs: schedule.tariffs };
-        if schedule.blocks.is_empty() {
-            new_schedule.blocks.push(Self::create_block(tariffs, 0, 23, BlockType::Use));
-            return new_schedule;
-        }
-
-        let mut next_start_hour: u8 = 0;
-        for block in schedule.blocks {
-            if block.start_hour != next_start_hour {
-                new_schedule.blocks.push(Self::create_block(tariffs, next_start_hour, block.start_hour - 1, BlockType::Hold));
+    let mut charge_tariff_out = charge_tariff_in;
+    let (charge_out, overflow, overflow_price) = net_prod[start..end].iter()
+        .enumerate()
+        .fold((charge_in, 0.0f64, 0.0f64), |acc, (i, &np)| {
+            let mut efficiency_adjusted: f64 = np;
+            if np < 0.0 {
+                efficiency_adjusted = np / DISCHARGE_EFFICIENCY;
             }
+            let (c, o) = correct_overflow((acc.0 + efficiency_adjusted).max(hold_level));
+            (c, acc.1 + o, acc.2 + tariffs.sell[i] * o)
+        });
 
-            next_start_hour = block.end_hour + 1;
-            new_schedule.blocks.push(block);
-        }
-
-        if next_start_hour != 24 {
-            new_schedule.blocks.push(Self::create_block(tariffs, next_start_hour, 23, BlockType::Hold));
-        }
-        new_schedule
+    if charge_out > charge_in {
+        charge_tariff_out = charge_in / charge_out * charge_tariff_in;
     }
 
-    /// Helper function to avoid having clutter higher level functions
-    ///
-    /// It creates a new Block, fills in some default values and calculates mean price
-    /// for the block
-    ///
-    /// # Arguments
-    ///
-    /// * 'tariffs' - used to fill in mean price
-    /// * 'start' - start hour for the block
-    /// * 'end' - end hour (inclusive) for the block
-    fn create_block(tariffs: &Vec<f64>, start: u8, end: u8, block_type: BlockType) -> Block {
-        let hour_price = tariffs[start as usize..=end as usize].to_vec();
-        Block {
-            block_type,
-            max_min_soc: 100,
-            max_soc: 100,
-            start_hour: start,
-            end_hour: end,
-            mean_price: hour_price.iter().sum::<f64>() / hour_price.len() as f64,
-            hour_price,
-            is_updated: false,
-            status: Status::Waiting,
-        }
-    }
+    (charge_out, charge_tariff_out, overflow, overflow_price)
+}
 
-    /// Returns the best block with respect to the lowest mean price within the range start to end
-    ///
-    /// # Arguments
-    ///
-    /// * 'tariffs' - NordPool tariffs
-    /// * 'block_len' - length of charge block to return
-    /// * 'start' - start hour to search within
-    /// * 'end' - end hour (inclusive) to search within
-    fn get_charge_block(tariffs: &Vec<f64>, block_len: u8, start: u8, end: u8) -> Block {
-        let mut block: Block = Block {
-            block_type: BlockType::Charge,
-            max_min_soc: 100,
-            max_soc: 100,
-            start_hour: 0,
-            end_hour: 0,
-            mean_price: 10000.0,
-            hour_price: Vec::new(),
-            is_updated: false,
-            status: Status::Waiting,
-        };
+/// Corrects for overflow, i.e. separates out what can't be stored in battery as overflow
+///
+/// It returns a tuple with remaining charge and overflow
+///
+/// # Arguments
+///
+/// * 'charge' - charge to correct
+fn correct_overflow(charge: f64) -> (f64, f64) {
+    (charge.min(BAT_KWH), (charge - BAT_KWH).max(0.0))
+}
 
-        for hour in start..=end.min(24 - block_len) {
-            let hour_price: Vec<f64> = tariffs[hour as usize..(hour + block_len) as usize].to_vec();
-            let s = hour_price.iter().sum::<f64>() / block_len as f64;
-            if s < block.mean_price {
-                block.start_hour = hour;
-                block.end_hour = hour + block_len - 1;
-                block.mean_price = s;
-                block.hour_price = hour_price;
-            }
-        }
+/// Splits tariffs into twp separate vectors,one for buying and one for selling electricity
+///
+/// # Arguments
+///
+/// * 'tariffs' - hourly prices from NordPool (excl VAT)
+fn split_tariffs(tariffs: &Vec<f64>) -> Tariffs {
+    let mut buy: [f64;24] = [0.0;24];
+    let mut sell: [f64;24] = [0.0;24];
+    tariffs.iter().enumerate().for_each(|(i, &t)| (buy[i], sell[i]) = add_vat_markup(t));
 
-        block
-    }
+    Tariffs { buy, sell, }
+}
 
-    /// Returns all valid use block containing only tariffs on or higher than min price.
-    /// The logic also sorts out any sub sets and intersecting sets, keeping the set with the highest
-    /// mean price. Also, adjacent sets are sorted out since there is then no time to recharge
-    /// batteries in between.
-    ///
-    /// # Arguments
-    ///
-    /// * 'tariffs' - NordPool tariffs
-    /// * 'min_price' - minimum price an hour must cost for it to be part of a use block
-    /// * 'max_block_len' - maximum number of hours a use block is allowed to contain
-    /// * 'start' - start hour to search within
-    /// * 'end' - end hour (inclusive) to search within
-    fn get_use_block(tariffs: &Vec<f64>, min_price: f64, max_block_len: u8, start: u8, end: u8) -> Vec<Block> {
-        let mut blocks: Vec<Block> = Vec::new();
+/// Adds VAT and other markups such as energy taxes etc.
+///
+/// The function spits out one buy price and one sell price
+/// Buy:
+/// * - Net fee: 31.6 öre (inc VAT)
+/// * - Spot fee: 7.7% (inc VAT)
+/// * - Energy taxes: 54.875 öre (inc VAT)
+/// * - Spot price (excl VAT)
+/// * - Extra: 2.4 öre (excl VAT)
+///
+/// Sell:
+/// * - Extra: 9.4 öre (inc VAT)
+/// * - Tax reduction: 60 öre (inc VAT), is returned yearly together with tax regulation
+/// * - Spot price (excl VAT)
+///
+/// # Arguments
+///
+/// * 'tariff' - spot fee as from NordPool
+fn add_vat_markup(tariff: f64) -> (f64, f64) {
+    let buy = 0.316 + 0.077 * tariff + 0.54875 + (tariff + 0.024) / 0.8;
+    let sell = 0.094 + 0.6 + tariff / 0.8;
 
-        for start_hour in start..=end {
-            if tariffs[start_hour as usize] >= min_price {
-                let mut prices: Vec<f64> = vec![tariffs[start_hour as usize]];
-                for hour2 in (start_hour + 1)..(start_hour + max_block_len).min(24) {
-                    if tariffs[hour2 as usize] >= min_price {
-                        prices.push(tariffs[hour2 as usize]);
-                    } else {
-                        break;
-                    }
-                }
-                blocks.push(Block {
-                    block_type: BlockType::Use,
-                    max_min_soc: 100,
-                    max_soc: 100,
-                    start_hour,
-                    end_hour: start_hour + prices.len() as u8 - 1,
-                    mean_price: prices.iter().sum::<f64>() / prices.len() as f64,
-                    hour_price: prices,
-                    is_updated: false,
-                    status: Status::Waiting,
-                });
-            }
-        }
-
-        Self::filter_out_subsets(blocks)
-    }
-
-    /// Filters out subsets and adjacent sets, while keeping best set or sets in terms of
-    /// high hour prices.
-    ///
-    /// # Arguments
-    ///
-    /// * 'blocks' - blocks to filter
-    fn filter_out_subsets(blocks: Vec<Block>) -> Vec<Block> {
-        let mut intermediate_blocks: Vec<Block> = Vec::new();
-        let mut filtered_blocks: Vec<Block> = Vec::new();
-
-        let mut set: HashSet<u8> = HashSet::new();
-        let mut mean_price: f64 = 0.0;
-
-        // Filter out succeeding blocks that are either subsets of a preceding block or
-        // are intersects but with a lower mean price. Also, a succeeding block that is
-        // an intersect, but with higher mean price, will replace the preceding block.
-        for block in blocks {
-            let next_set: HashSet<u8> = (block.start_hour..=block.end_hour).collect::<HashSet<u8>>();
-            if !next_set.is_subset(&set) {
-                if !next_set.is_disjoint(&set) {
-                    if block.mean_price > mean_price {
-                        intermediate_blocks.remove(intermediate_blocks.len() - 1);
-                        set = next_set;
-                        mean_price = block.mean_price;
-                        intermediate_blocks.push(block);
-                    }
-                } else {
-                    set = next_set;
-                    mean_price = block.mean_price;
-                    intermediate_blocks.push(block);
-                }
-            }
-        }
-
-        // Filter out any trailing adjacent block since there is then no possibility
-        // to charge batteries in between
-        let mut end_hour: u8 = 24;
-        for block in intermediate_blocks {
-            if block.start_hour != end_hour + 1 {
-                end_hour = block.end_hour;
-                filtered_blocks.push(block);
-            }
-        }
-
-        filtered_blocks
-    }
-
-    /// Collects tariffs from vector nad stores values in Self
-    ///
-    /// # Arguments
-    ///
-    /// * 'tariffs' - NordPool tariffs
-    fn tariffs_to_array(&mut self, tariffs: &Vec<f64>) -> Result<Self, SchedulingError> {
-        if tariffs.len() == 24 {
-            tariffs.iter().enumerate().for_each(|(i, &t)| self.tariffs[i] = t);
-            Ok(self.to_owned())
-        } else {
-            Err(SchedulingError(format!("Tariffs vector illegal length: {}", tariffs.len())))
-        }
-    }
+    (buy, sell * SELL_PRIORITY)
 }
 
 /// Creates a new schedule including updating charge levels
@@ -620,37 +746,21 @@ impl Schedule {
 /// * 'nordpool' - reference to a NordPool struct
 /// * 'smhi' - reference to a SMHI struct
 /// * 'date_time' - the date for which the schedule shall be created
+/// * 'charge_in' - residual charge from previous block
+/// * 'charge_tariff_in' - mean tariff for residual charge
 /// * 'backup_dir' - the path to the backup directory
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, backup_dir: &str) -> Result<Schedule, SchedulingError> {
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
-    let mut schedule = Schedule::from_tariffs(&tariffs, date_time)?.update_status();
-    schedule.update_charge_levels(&production, &consumption, false);
-    save_backup(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption(), &schedule)?;
+    let schedule = Schedule::new_with_scheduling(date_time.hour() as usize, &tariffs, &production, &consumption, charge_in, charge_tariff_in, date_time);
+    save_base_data(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption())?;
 
     Ok(schedule)
 }
 
-/// Updates an existing schedule with updated charge levels
-///
-/// # Arguments
-///
-/// * 'schedule' - a mutable reference to an existing schedule to be updated
-/// * 'smhi' - reference to a SMHI struct
-/// * 'backup_dir' - the path to the backup directory
-pub fn update_existing_schedule(schedule: &mut Schedule, smhi: &mut SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
-    let local_now = Local::now();
-    let forecast = retry!(||smhi.new_forecast(local_now))?;
-    let production = PVProduction::new(&forecast, LAT, LONG);
-    let consumption = Consumption::new(&forecast);
-    schedule.update_charge_levels(&production, &consumption, true);
-    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), schedule)?;
-
-    Ok(())
-}
-
+/*
 /// Saves a backup of the current schedule including current charge levels
 /// This is very similar to the function update_existing_schedule, but it doesn't fetch a new
 /// forecast from SMHI, rather it uses the last one fetched.
@@ -665,7 +775,9 @@ pub fn backup_schedule(schedule: &Schedule, smhi: &SMHI, backup_dir: &str) -> Re
     let forecast = smhi.get_forecast().clone();
     let production = PVProduction::new(&forecast, LAT, LONG);
     let consumption = Consumption::new(&forecast);
-    save_backup(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption(), schedule)?;
+    save_base_data(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption())?;
 
     Ok(())
 }
+
+ */

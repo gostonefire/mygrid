@@ -1,56 +1,57 @@
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::ops::Add;
+use std::path::Path;
 use std::thread;
-use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
-use glob::glob;
+use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
 use crate::models::smhi_forecast::TimeValues;
 use crate::{retry, wrapper};
-use crate::scheduling::{Schedule};
+use crate::charge::LastCharge;
+use crate::scheduling::{Block};
 
 
 #[derive(Serialize, Deserialize)]
-pub struct Backup {
+pub struct BaseData {
     date_time: DateTime<Local>,
     pub forecast: [TimeValues; 24],
     production: [f64; 24],
     consumption: [f64; 24],
-    pub schedule: Schedule,
 }
 
-/// Saves a backup to file as json if the given date_time is not in the future
-/// The filename gives at most one unique file per hour
+#[derive(Serialize, Deserialize)]
+pub struct State {
+    date_time: DateTime<Local>,
+    block: Block,
+}
+
+/// Saves base data used in the creation of a schedule if time is not in the future
 ///
 /// # Arguments
 ///
 /// * 'backup_dir' - the directory to save the file to
-/// * 'date_time' - the date and time the backup represents
+/// * 'date_time' - the date and time the state represents
 /// * 'forecast' - the smhi forecast to save
 /// * 'production' - the production estimates to save
 /// * 'consumption' - the consumption estimates to save
-/// * 'schedule' - the schedule to save
-pub fn save_backup(
+pub fn save_base_data(
     backup_dir: &str,
     date_time: DateTime<Local>,
     forecast: [TimeValues; 24],
     production: [f64; 24],
-    consumption: [f64; 24],
-    schedule: &Schedule) -> Result<(), BackupError> {
+    consumption: [f64; 24]) -> Result<(), BackupError> {
 
     if Local::now().timestamp() >= date_time.timestamp() {
-        let file_path = format!("{}{}.json", backup_dir, date_time.format("%Y%m%d_%H"));
-        let s = schedule.clone();
+        let file_path = format!("{}base_data.json", backup_dir);
 
-        let backup = Backup {
+        let backup = BaseData {
             date_time,
             forecast,
             production,
             consumption,
-            schedule: s,
         };
 
         let json = serde_json::to_string_pretty(&backup)?;
@@ -60,37 +61,105 @@ pub fn save_backup(
     Ok(())
 }
 
-/// Loads backup from json on file
-///
-/// it will look for the most resent backup for the current day
+/// Loads last saved base data from file
 ///
 /// # Arguments
 ///
 /// * 'backup_dir' - the directory to save the file to
-pub fn load_backup(backup_dir: &str) -> Result<Option<Backup>, BackupError> {
-    let mut entries: Vec<String> = Vec::new();
-    let file_path = format!("{}{}.json", backup_dir, Local::now().format("%Y%m%d*"));
-    for entry in glob(&file_path)? {
-        let path = entry?;
-        if path.is_file() {
-            if let Some(os_path) = path.to_str() {
-                entries.push(os_path.to_string());
-            }
+/// * 'date_time' - the date the base data must represent
+pub fn load_base_data(backup_dir: &str, date_time: DateTime<Local>) -> Result<Option<BaseData>, BackupError> {
+    let file_path = format!("{}base_data.json", backup_dir);
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let json = fs::read_to_string(path)?;
+        let state: BaseData = serde_json::from_str(&json)?;
+
+        if state.date_time.ordinal0() == date_time.ordinal0() {
+            return Ok(Some(state));
         }
     }
 
-    entries.sort();
+    Ok(None)
+}
 
-    if entries.len() > 0 {
-        let mut file = File::open(&entries[entries.len() - 1])?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        let backup: Backup = serde_json::from_str(&contents)?;
 
-        Ok(Some(backup))
-    } else {
-        Ok(None)
+/// Saves data about the last charge from grid to battery
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+/// * 'last_charge' - information from the last charge from grid
+pub fn save_last_charge(backup_dir: &str, last_charge: &Option<LastCharge>) -> Result<(), BackupError> {
+    if let Some(last_charge) = last_charge {
+        let file_path = format!("{}last_charge.json", backup_dir);
+
+        let json = serde_json::to_string_pretty(last_charge)?;
+        fs::write(file_path, json)?;
     }
+
+    Ok(())
+}
+
+/// Loads data about the last charge made from grid to battery.
+/// If none is found or if the data is older than 12 hours then None is returned
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+pub fn load_last_charge(backup_dir: &str) -> Result<Option<LastCharge>, BackupError> {
+    let file_path = format!("{}last_charge.json", backup_dir);
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let json = fs::read_to_string(path)?;
+        let last_charge: LastCharge = serde_json::from_str(&json)?;
+
+        if Local::now() - last_charge.date_time_end <= TimeDelta::hours(12) {
+            return Ok(Some(last_charge))
+        }
+    }
+
+    Ok(None)
+}
+
+/// Saves a state represented by a Block
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+/// * 'block' - the block that represents a state to save
+pub fn save_active_block(backup_dir: &str, block: &Block) -> Result<(), BackupError> {
+    let file_path = format!("{}active_block.json", backup_dir);
+
+    let json = serde_json::to_string_pretty(block)?;
+    fs::write(file_path, json)?;
+
+    Ok(())
+}
+
+/// Loads state represented by a Block
+///
+/// # Arguments
+///
+/// * 'backup_dir' - the directory to save the file to
+/// * 'date_time' - the date and time that the state must cover to be returned
+pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result<Option<Block>, BackupError> {
+    let file_path = format!("{}active_block.json", backup_dir);
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let json = fs::read_to_string(path)?;
+        let block: Block = serde_json::from_str(&json)?;
+
+        let date = date_time.date_naive();
+        let hour = date_time.hour() as usize;
+        if block.date == date && hour >= block.start_hour && hour <= block.end_hour {
+            return Ok(Some(block))
+        }
+    }
+
+    Ok(None)
 }
 
 /// Gat and saves statistics from yesterday

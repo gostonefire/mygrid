@@ -46,12 +46,6 @@ impl SMHI {
         self.forecast = forecast;
     }
 
-    /// Gets the current forecast
-    ///
-    pub fn get_forecast(&self) -> &[TimeValues; 24] {
-        &self.forecast
-    }
-
     /// Retrieves a whether forecast from SMHI for the given date.
     /// The raw forecast consists of several days worth of data and many whether parameters
     /// but the returned forecast will only include the specified date and data

@@ -31,6 +31,9 @@ impl From<BackupError> for MyGridInitError {
 impl From<MailError> for MyGridInitError {
     fn from(e: MailError) -> Self { MyGridInitError(e.to_string()) }
 }
+impl From<MyGridWorkerError> for MyGridInitError {
+    fn from(e: MyGridWorkerError) -> Self { MyGridInitError(e.to_string()) }
+}
 impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridInitError {
     fn from(e: PoisonError<RwLockReadGuard<'_, bool>>) -> Self { MyGridInitError(e.to_string()) }
 }
@@ -110,16 +113,6 @@ impl From<std::io::Error> for BackupError {
 }
 impl From<serde_json::Error> for BackupError {
     fn from(e: serde_json::Error) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::PatternError> for BackupError {
-    fn from(e: glob::PatternError) -> Self {
-        BackupError(e.to_string())
-    }
-}
-impl From<glob::GlobError> for BackupError {
-    fn from(e: glob::GlobError) -> Self {
         BackupError(e.to_string())
     }
 }

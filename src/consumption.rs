@@ -26,15 +26,6 @@ impl Consumption {
         consumption
     }
 
-    /// Returns the calculated consumption estimate for the given hour
-    ///
-    /// # Arguments
-    ///
-    /// * 'hour' - hour to get estimated load for
-    pub fn get_hour_consumption(&self, hour: usize) -> f64 {
-        self.hours[hour]
-    }
-
     /// Return the hourly calculated consumption estimates
     pub fn get_consumption(&self) -> [f64;24] {
         self.hours

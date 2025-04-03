@@ -11,7 +11,6 @@ mod manager_fox_cloud;
 mod manager_sun;
 mod models;
 mod manager_smhi;
-mod scheduling;
 mod production;
 mod consumption;
 mod macros;
@@ -21,7 +20,8 @@ mod errors;
 mod backup;
 mod manager_mail;
 mod manual;
-mod scheduling_v2;
+mod scheduling;
+mod charge;
 
 /// Latitude of the power plant
 const LAT: f64 = 56.22332313734338;
@@ -40,18 +40,18 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, mut smhi, schedule, gmail, backup_dir, stats_dir, manual_file) = match init() {
-            Ok((f, n, s, sc, g, b, st, mf)) => (f, n, s, sc, g, b, st, mf),
+        let (fox, nordpool, mut smhi, mail, active_block, last_charge, backup_dir, stats_dir, manual_file) = match init() {
+            Ok((f, n, s, m, ab, lc, b, st, mf)) => (f, n, s, m, ab, lc, b, st, mf),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
                 continue;
             }
         };
 
-        match run(fox, nordpool, &mut smhi, schedule, &gmail, backup_dir, stats_dir, manual_file) {
+        match run(fox, nordpool, &mut smhi, active_block, last_charge, backup_dir, stats_dir, manual_file) {
             Ok(()) => return,
             Err(e) => {
-                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&gmail));
+                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mail));
             }
         }
     }

@@ -1,25 +1,24 @@
-use std::ops::Add;
 use std::thread;
-use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike, Duration};
+use chrono::{DateTime, Datelike, Local, Timelike, Duration};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
-use crate::backup::save_yesterday_statistics;
+use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics};
+use crate::charge::{get_last_charge, get_soc_history, soc_to_available_charge, update_stored_charge_cost, LastCharge};
 use crate::errors::{MyGridWorkerError};
 use crate::manager_mail::Mail;
-use crate::scheduling::{backup_schedule, create_new_schedule, update_existing_schedule, Block, BlockType, Schedule, Status};
+use crate::scheduling::{create_new_schedule, Block, BlockType, Schedule, Status};
 use crate::manual::check_manual;
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule, mail: &Mail, backup_dir: String, stats_dir: String, manual_file: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Option<Block>, mut last_charge: Option<LastCharge>, backup_dir: String, stats_dir: String, manual_file: String)
            -> Result<(), MyGridWorkerError> {
 
-    // Main loop that runs once every ten seconds
-    let mut update_done: u32 = 24;
+    let mut schedule: Schedule;
     let mut charge_check_done: DateTime<Local> = DateTime::default();
-    let mut day_ahead_schedule: Schedule = Schedule::new();
-    let mut local_now: DateTime<Local>;
-    let mut day_of_year = schedule.date.ordinal0();
+    let mut local_now = Local::now();
+    let mut day_of_year = local_now.ordinal0();
+
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
         local_now = Local::now();
@@ -33,35 +32,11 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
             }
         }
 
-        // Create and display an estimated schedule for tomorrow and save some stats from Fox
-        if local_now.hour() >= 15 && day_ahead_schedule.date.timestamp() <= local_now.timestamp() {
-            let future = Local::now()
-                .add(Duration::days(1))
-                .duration_trunc(TimeDelta::days(1))?;
-            let current_forecast = smhi.get_forecast().clone();
-            day_ahead_schedule = if let Ok(est) = create_new_schedule(&nordpool, smhi, future, &backup_dir) {
-                print_schedule(&est,"Tomorrow Estimate", Some(mail));
-
-                est
-            } else {Schedule::new()};
-            smhi.set_forecast(current_forecast);
-
-            save_yesterday_statistics(&stats_dir, &fox)?;
-        }
-
-        // Create a new schedule everytime we go into a new day
-        if day_of_year != local_now.ordinal0() {
+        // Check inverter time and save some stats once every day, hour 10 is arbitrary
+        if day_of_year != local_now.ordinal0() && local_now.hour() >= 10 {
             check_inverter_local_time(&fox)?;
-            schedule = create_new_schedule(&nordpool, smhi, local_now, &backup_dir)?;
-            update_done = local_now.hour();
+            save_yesterday_statistics(&stats_dir, &fox)?;
             day_of_year = local_now.ordinal0();
-        }
-
-        // Update existing schedule once every hour to take into consideration any recent
-        // changes in whether forecasts
-        if local_now.minute() == 0 && local_now.hour() != update_done {
-            update_existing_schedule(&mut schedule, smhi, &backup_dir)?;
-            update_done = local_now.hour();
         }
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
@@ -69,37 +44,47 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
         // with that frequency) if we have a started and running charge block where max SoC
         // has been reached. If so, we disable force charge and set the inverter min soc
         // on grid to max soc (i.e. we set it to Hold) and also set the block status to Full.
-        if let Some(b) = schedule.get_current_started_charge(local_now.hour() as u8) {
+        if active_block.as_ref().is_some_and(|b| b.is_charge() && b.is_active(local_now)) {
+
             if local_now - charge_check_done > Duration::minutes(5) {
-                if let Some(status) = set_full_if_done(&fox, schedule.blocks[b].max_soc)? {
-                    schedule.update_block_status(b, status)?;
-                    schedule.reset_is_updated(b);
-                    backup_schedule(&schedule, smhi, &backup_dir)?;
-                    print_schedule(&schedule,"Update", None);
+                let mut block = active_block.unwrap();
+                if let Some(status) = set_full_if_done(&fox, block.soc_out)? {
+                    block.update_block_status(status);
+                    last_charge = Some(get_last_charge(&block, local_now));
+
+                    save_last_charge(&backup_dir, &last_charge)?;
+                    save_active_block(&backup_dir, &block)?;
                 }
+                active_block = Some(block);
                 charge_check_done = local_now;
             }
         }
 
-        // Check if we have any block in hold mode (i.e. Charge/Full or Hold/Started) for the given
-        // hour. If that block is updated due to changes in whether forecasts we update the
-        // min soc on grid to reflect new hold soc level.
-        if let Some(b) = schedule.get_conditional(
-            local_now.hour() as u8, vec!((&BlockType::Charge, &Status::Full), (&BlockType::Hold, &Status::Started))) {
+        // This is the main mode selector given a new schedule after every finished block
+        // It first checks if there is any stored last_charge struct, in which chase it can
+        // use that to calculate the new charge tariff per stored kWh. Otherwise, it uses the previous
+        // active block to get the estimated charge tariff per stored kWh. As a last resort it just
+        // has to assume 0.0.
+        // Regardless it always fetches the current soc from the inverter as charge in for the
+        // schedule to be calculated and created.
+        if !active_block.as_ref().is_some_and(|b| b.is_active(local_now)) {
+            let (charge_in, charge_tariff_in) = match last_charge {
+                None => {
+                    let (_, soc_current) = get_soc_history(&fox, None)?;
+                    let charge_tariff_out = active_block.as_ref().map_or(0.0, |b| b.charge_tariff_out);
+                    (soc_to_available_charge(soc_current), charge_tariff_out)
+                },
+                Some(last_charge) => {
+                    let (soc_history, soc_current) = get_soc_history(&fox, Some(last_charge.date_time_end))?;
+                    let charge_tariff_out = update_stored_charge_cost(&soc_history, last_charge.charge_tariff_out);
 
-            let block = schedule.get_block_clone(b).unwrap();
-            if block.is_updated {
-                update_hold(&fox, block.max_min_soc)?;
-                schedule.reset_is_updated(b);
-                backup_schedule(&schedule, smhi, &backup_dir)?;
-                print_schedule(&schedule,"Update", None);
-            }
-        }
+                    (soc_to_available_charge(soc_current), charge_tariff_out)
+                }
+            };
+            schedule = create_new_schedule(&nordpool, smhi, local_now, charge_in, charge_tariff_in, &backup_dir)?;
+            let mut block = schedule.get_block(local_now.hour() as usize)?;
 
-        // This is the main mode switch following the schedule
-        if let Some(b) = schedule.get_eligible_for_start(local_now.hour() as u8) {
             let status: Status;
-            let block = schedule.get_block_clone(b).unwrap();
             match block.block_type {
                 BlockType::Charge => {
                     status = set_charge(&fox, &block).map_err(|e| {
@@ -108,7 +93,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                 },
 
                 BlockType::Hold => {
-                    status = set_hold(&fox, block.max_min_soc).map_err(|e| {
+                    status = set_hold(&fox, block.soc_in as u8).map_err(|e| {
                         MyGridWorkerError::new(e.to_string(), &block)
                     })?;
                 },
@@ -119,9 +104,17 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
                     })?;
                 },
             }
-            schedule.update_block_status(b, status)?;
-            schedule.reset_is_updated(b);
-            backup_schedule(&schedule, smhi, &backup_dir)?;
+            schedule.update_block_status(local_now.hour() as usize, status.clone());
+            if active_block.as_ref().is_some_and(|b| b.is_charge()) {
+                let previous_block = active_block.as_ref().unwrap();
+                last_charge = Some(get_last_charge(previous_block, local_now));
+                save_last_charge(&backup_dir, &last_charge)?;
+
+            }
+            block.update_block_status(status);
+            save_active_block(&backup_dir, &block)?;
+            active_block = Some(block);
+
             print_schedule(&schedule,"Update", None);
         }
     }
@@ -132,7 +125,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut schedule: Schedule
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
+pub fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
     let dt = retry!(||fox.get_device_time())?;
     let now = Local::now().naive_local();
     let delta = (now - dt).abs();
@@ -163,16 +156,16 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
     if is_manual_debug()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
-    if soc >= block.max_soc {
+    if soc >= block.soc_out as u8 {
         let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_min_soc_on_grid(block.max_soc))?;
+        let _ = retry!(||fox.set_min_soc_on_grid(block.soc_out as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
         Ok(Status::Full)
     } else {
-        let _ = retry!(||fox.set_max_soc(block.max_soc))?;
+        let _ = retry!(||fox.set_max_soc(block.soc_out as u8))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        true, block.start_hour, 0, block.end_hour, 59,
+                        true, block.start_hour as u8, 0, block.end_hour as u8, 59,
                         false, 0, 0, 0, 0,
                     ))?;
 
@@ -190,8 +183,8 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'max_soc' - max soc
-fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWorkerError> {
-    let soc= retry!(||fox.get_current_soc())?;
+fn set_full_if_done(fox: &Fox, max_soc: usize) -> Result<Option<Status>, MyGridWorkerError> {
+    let soc= retry!(||fox.get_current_soc())? as usize;
     if soc >= max_soc {
         print_msg("Setting charge block to full", "Update", None);
         if is_manual_debug()? {return Ok(Some(Status::Full))}
@@ -199,7 +192,7 @@ fn set_full_if_done(fox: &Fox, max_soc: u8) -> Result<Option<Status>, MyGridWork
         let min_soc = max_soc.max(10).min(100);
 
         let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_min_soc_on_grid(min_soc))?;
+        let _ = retry!(||fox.set_min_soc_on_grid(min_soc as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
         Ok(Some(Status::Full))
@@ -248,6 +241,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'max_min_soc' - max min soc allowed for the block
+#[allow(dead_code)]
 fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
     print_msg("Updating hold block", "Update", None);
     if is_manual_debug()? {return Ok(())}
@@ -281,6 +275,7 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     Ok(Status::Started)
 }
 
+
 /// Prints a schedule, i.e. its blocks, with a caption
 ///
 /// # Arguments
@@ -292,7 +287,7 @@ pub fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let caption = format!("{} {} ", report_time, caption);
 
-    let mut msg = format!("{:=<137}\n", caption.to_string() + " ");
+    let mut msg = format!("{:=<179}\n", caption.to_string() + " ");
     for s in &schedule.blocks {
         msg += &format!("{}\n", s);
     }
@@ -314,7 +309,7 @@ fn print_msg(message: &str, caption: &str, mail: Option<&Mail>) {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let caption = format!("{} {} ", report_time, caption);
 
-    let msg = format!("{:=<137}\n{}\n", caption.to_string() + " ", message);
+    let msg = format!("{:=<179}\n{}\n", caption.to_string() + " ", message);
     println!("{}", msg);
 
     if let Some(m) = mail {

@@ -10,5 +10,4 @@ serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_with = { version = "3.12", features = ["chrono"] }
 trig = "0.1"
-glob = "0.3"
 ureq = "3.0"

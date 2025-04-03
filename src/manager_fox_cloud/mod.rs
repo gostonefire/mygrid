@@ -149,7 +149,7 @@ impl Fox {
 
         let req = RequestDeviceHistoryData {
             sn: self.sn.clone(),
-            variables: ["pvPower", "loadsPower", "meterPower"]
+            variables: ["pvPower", "loadsPower", "SoC"]
                 .iter().map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             begin: start.timestamp_millis(),
@@ -481,6 +481,7 @@ fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Res
     let mut time: Vec<String> = Vec::new();
     let mut pv_power: Vec<f64> = Vec::new();
     let mut ld_power: Vec<f64> = Vec::new();
+    let mut soc: Vec<u8> = Vec::new();
 
     for set in &input[0].data_set {
         if set.variable == "pvPower" {
@@ -495,6 +496,10 @@ fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Res
             for data in &set.data {
                 ld_power.push(data.value);
             }
+        } else if set.variable == "SoC" {
+            for data in &set.data {
+                soc.push(data.value as u8);
+            }
         }
     }
 
@@ -503,6 +508,7 @@ fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Res
         time,
         pv_power,
         ld_power,
+        soc,
     })
 }
 

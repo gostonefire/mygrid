@@ -42,6 +42,7 @@ pub struct DeviceHistory {
     pub time: Vec<String>,
     pub pv_power: Vec<f64>,
     pub ld_power: Vec<f64>,
+    pub soc: Vec<u8>,
 }
 
 fn deserialize_scientific_notation<'de, D>(deserializer: D) -> Result<f64, D::Error>
