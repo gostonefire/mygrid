@@ -52,7 +52,7 @@ pub enum Status {
     Waiting,
     Started,
     Missed,
-    Full,
+    Full(usize),
     Error,
 }
 
@@ -60,30 +60,14 @@ pub enum Status {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Status::Waiting => write!(f, "Waiting"),
-            Status::Started => write!(f, "Started"),
-            Status::Missed  => write!(f, "Missed "),
-            Status::Full    => write!(f, "Full   "),
-            Status::Error   => write!(f, "Error  "),
+            Status::Waiting => write!(f, "Waiting  "),
+            Status::Started => write!(f, "Started  "),
+            Status::Missed  => write!(f, "Missed   "),
+            Status::Full(soc) => write!(f, "Full: {:>3}", soc),
+            Status::Error   => write!(f, "Error    "),
         }
     }
 }
-
-/*
-/// Represents one block in a schedule
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Block {
-    pub block_type: BlockType,
-    pub max_min_soc: u8,
-    pub max_soc: u8,
-    pub start_hour: u8,
-    pub end_hour: u8,
-    pub mean_price: f64,
-    pub hour_price: Vec<f64>,
-    pub is_updated: bool,
-    pub status: Status,
-}
-*/
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
@@ -92,6 +76,7 @@ pub struct Block {
     pub start_hour: usize,
     pub end_hour: usize,
     size: usize,
+    tariffs: Option<Tariffs>,
     pub charge_tariff_in: f64,
     pub charge_tariff_out: f64,
     pub price: f64,
@@ -142,11 +127,26 @@ impl Block {
     }
 
     /// Updates a block with a new status
+    /// If the block is a Charge block and the new status is Full then a new charge tariff out is
+    /// calculated. Also, the soc out and charge out is updated to reflect the actual soc.
     ///
     /// # Arguments
     ///
     /// * 'status' - the status to update with
     pub fn update_block_status(&mut self, status: Status) {
+        if self.block_type == BlockType::Charge {
+            if let Status::Full(soc) = status {
+                if soc > self.soc_in {
+                    let tariffs = self.tariffs.as_ref().unwrap();
+                    let charge_in_bat = (soc - self.soc_in) as f64 * SOC_KWH;
+                    let (cost, _) = charge_cost_charge_end(self.start_hour, charge_in_bat / CHARGE_EFFICIENCY, tariffs);
+                    let charge_tariff = cost / charge_in_bat;
+                    self.charge_tariff_out = ((self.soc_in - 10) as f64 * self.charge_tariff_in + (soc - self.soc_in) as f64 * charge_tariff) / (soc - 10) as f64;
+                }
+                self.soc_out = soc;
+                self.charge_out = (soc - 10) as f64 * SOC_KWH;
+            }
+        }
         self.status = status;
     }
 }
@@ -332,6 +332,7 @@ fn create_base_blocks(schedule_id: u32, charge_in: f64, charge_tariff_in: f64, t
         start_hour: 0,
         end_hour: 23,
         size: 24,
+        tariffs: None,
         charge_tariff_in,
         charge_tariff_out,
         price: 0.0,
@@ -382,6 +383,7 @@ fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_ti
                 start_hour: result.next_start,
                 end_hour: 0,
                 size: 24 - result.next_start,
+                tariffs: None,
                 charge_tariff_in: result.next_charge_tariff_in,
                 charge_tariff_out,
                 price: 0.0,
@@ -466,6 +468,7 @@ fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: 
             start_hour: initial_start,
             end_hour: 0,
             size: u_start - initial_start,
+            tariffs: None,
             charge_tariff_in,
             charge_tariff_out: hold_charge_tariff_out,
             price: 0.0,
@@ -509,19 +512,21 @@ fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: 
 ///
 /// * 'start' - the charge block starting hour
 /// * 'size' - length of charge block
+/// * 'tariffs' - tariffs from NordPool
 /// * 'charge_in' - residual charge from previous block
 /// * 'charge_tariff_in' - mean tariff for residual charge
 /// * 'charge_out' - charge out after charging
 /// * 'charge_tariff_out' - mean tariff for charge in charge block
 /// * 'price' - the price, or cost, for charging
 /// * 'date_time' - the date to stamp on the block
-fn get_charge_block(start: usize, size: usize, charge_in: f64, charge_tariff_in: f64, charge_out: f64, charge_tariff_out: f64, price: f64, date_time: DateTime<Local>) -> Block {
+fn get_charge_block(start: usize, size: usize, tariffs: &Tariffs, charge_in: f64, charge_tariff_in: f64, charge_out: f64, charge_tariff_out: f64, price: f64, date_time: DateTime<Local>) -> Block {
     Block {
         block_type: BlockType::Charge,
         date: date_time.date_naive(),
         start_hour: start,
         end_hour: 0,
         size,
+        tariffs: Some(tariffs.clone()),
         charge_tariff_in,
         charge_tariff_out,
         price,
@@ -561,6 +566,7 @@ fn get_use_blocks(schedule_id: u32, u_start: usize, u_end: usize, charge_out: f6
         start_hour: u_start,
         end_hour: 0,
         size: u_end - u_start,
+        tariffs: None,
         charge_tariff_in: hold.charge_tariff_out,
         charge_tariff_out,
         price: u_price,
@@ -605,6 +611,7 @@ fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &T
         start_hour: initial_start,
         end_hour: 0,
         size: start - initial_start,
+        tariffs: None,
         charge_tariff_in,
         charge_tariff_out: hold_charge_tariff_out,
         price: 0.0,
@@ -617,29 +624,16 @@ fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &T
         status: Status::Waiting,
     };
 
-    let mut hourly_charge: Vec<f64> = Vec::new();
-
     let need = (soc_level as f64 * SOC_KWH - hold_charge_out) / CHARGE_EFFICIENCY;
     let charge: Block = if need > 0.0 {
-        let rem = need % CHARGE_KWH_HOUR;
-
-        (0..(need / CHARGE_KWH_HOUR) as usize).for_each(|_|hourly_charge.push(CHARGE_KWH_HOUR));
-        if (rem * 10.0).round() as usize != 0 {
-            hourly_charge.push(rem);
-        }
-        let end = (start + hourly_charge.len()).min(24);
-        let c_price = tariffs.buy[start..end].iter()
-            .enumerate()
-            .map(|(i, t)| hourly_charge[i] * t)
-            .sum::<f64>();
-
+        let (c_price, end) = charge_cost_charge_end(start, need, tariffs);
         let c_this_mean = c_price / need;
         let c_mean = need / (need + hold_charge_out) * c_this_mean + hold_charge_out / (need + hold_charge_out) * hold_charge_tariff_out;
 
-        get_charge_block(start, end - start, hold_charge_out, hold_charge_tariff_out, hold_charge_out + need, c_mean, c_price, date_time)
+        get_charge_block(start, end - start, tariffs, hold_charge_out, hold_charge_tariff_out, hold_charge_out + need, c_mean, c_price, date_time)
 
     } else {
-        get_charge_block(start, 0, hold_charge_out, hold_charge_tariff_out, hold_charge_out, hold_charge_tariff_out, 0.0, date_time)
+        get_charge_block(start, 0, tariffs, hold_charge_out, hold_charge_tariff_out, hold_charge_out, hold_charge_tariff_out, 0.0, date_time)
     };
 
     Blocks {
@@ -651,6 +645,31 @@ fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &T
         total_price: hold.price + hold.overflow_price - charge.price,
         blocks: vec![hold, charge],
     }
+}
+
+/// Calculates the cost for a given charge from grid at a given start time
+/// It also returns the expected end for the charging period
+///
+/// # Arguments
+///
+/// * 'start' - start hour for charging from grid
+/// * 'charge' - charge in kWh
+/// * 'tariffs' - tariffs (sell tariffs used here) inc VAT and extra
+fn charge_cost_charge_end(start: usize, charge: f64, tariffs: &Tariffs) -> (f64, usize) {
+    let mut hourly_charge: Vec<f64> = Vec::new();
+    let rem = charge % CHARGE_KWH_HOUR;
+
+    (0..(charge / CHARGE_KWH_HOUR) as usize).for_each(|_|hourly_charge.push(CHARGE_KWH_HOUR));
+    if (rem * 10.0).round() as usize != 0 {
+        hourly_charge.push(rem);
+    }
+    let end = (start + hourly_charge.len()).min(24);
+    let c_price = tariffs.buy[start..end].iter()
+        .enumerate()
+        .map(|(i, t)| hourly_charge[i] * t)
+        .sum::<f64>();
+
+    (c_price, end)
 }
 
 /// Updates stored charges and how addition from PV (free electricity) effects the mean price for the stored charge.
@@ -666,6 +685,7 @@ fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &T
 /// * 'charge_in' - residual charge from previous block
 /// * 'charge_tariff_in' - mean tariff for residual charge
 fn update_for_pv(block_type: BlockType, start: usize, end: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64) -> (f64, f64, f64, f64) {
+    let mut min_charge = charge_in;
     let mut hold_level: f64 = 0.0;
     if block_type == BlockType::Hold {
         hold_level = charge_in;
@@ -680,11 +700,19 @@ fn update_for_pv(block_type: BlockType, start: usize, end: usize, tariffs: &Tari
                 efficiency_adjusted = np / DISCHARGE_EFFICIENCY;
             }
             let (c, o) = correct_overflow((acc.0 + efficiency_adjusted).max(hold_level));
+            min_charge = min_charge.min(c);
+
             (c, acc.1 + o, acc.2 + tariffs.sell[i] * o)
         });
 
+    // Blend in free charge from PV into the mean tariff for the period
     if charge_out > charge_in {
         charge_tariff_out = charge_in / charge_out * charge_tariff_in;
+    }
+
+    // If charge was ever down to zero then mean tariff for what is left in battery has to be zero
+    if min_charge == 0.0 {
+        charge_tariff_out = 0.0;
     }
 
     (charge_out, charge_tariff_out, overflow, overflow_price)
@@ -759,25 +787,3 @@ pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: Date
 
     Ok(schedule)
 }
-
-/*
-/// Saves a backup of the current schedule including current charge levels
-/// This is very similar to the function update_existing_schedule, but it doesn't fetch a new
-/// forecast from SMHI, rather it uses the last one fetched.
-///
-/// # Arguments
-///
-/// * 'schedule' - a mutable reference to an existing schedule to be updated
-/// * 'smhi' - reference to a SMHI struct
-/// * 'backup_dir' - the path to the backup directory
-pub fn backup_schedule(schedule: &Schedule, smhi: &SMHI, backup_dir: &str) -> Result<(), SchedulingError> {
-    let local_now = Local::now();
-    let forecast = smhi.get_forecast().clone();
-    let production = PVProduction::new(&forecast, LAT, LONG);
-    let consumption = Consumption::new(&forecast);
-    save_base_data(backup_dir, local_now, forecast, production.get_production(), consumption.get_consumption())?;
-
-    Ok(())
-}
-
- */

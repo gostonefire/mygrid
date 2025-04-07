@@ -1,11 +1,11 @@
 use std::thread;
-use chrono::{DateTime, Datelike, Local, Timelike, Duration};
+use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics};
-use crate::charge::{get_last_charge, get_soc_history, soc_to_available_charge, update_stored_charge_cost, LastCharge};
+use crate::charge::{get_last_charge, updated_charge_data, LastCharge};
 use crate::errors::{MyGridWorkerError};
 use crate::manager_mail::Mail;
 use crate::scheduling::{create_new_schedule, Block, BlockType, Schedule, Status};
@@ -34,9 +34,15 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
 
         // Check inverter time and save some stats once every day, hour 15 is arbitrary
         if day_of_year != local_now.ordinal0() && local_now.hour() >= 15 {
+
             check_inverter_local_time(&fox)?;
             save_yesterday_statistics(&stats_dir, &fox)?;
             day_of_year = local_now.ordinal0();
+        }
+
+        // Reset last_charge if it is older than 23 hours
+        if last_charge.as_ref().is_some_and(|b| local_now - b.date_time_end > TimeDelta::hours(23)) {
+            last_charge = None;
         }
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
@@ -68,19 +74,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
         // Regardless it always fetches the current soc from the inverter as charge in for the
         // schedule to be calculated and created.
         if !active_block.as_ref().is_some_and(|b| b.is_active(local_now)) {
-            let (charge_in, charge_tariff_in) = match last_charge {
-                None => {
-                    let (_, soc_current) = get_soc_history(&fox, None)?;
-                    let charge_tariff_out = active_block.as_ref().map_or(0.0, |b| b.charge_tariff_out);
-                    (soc_to_available_charge(soc_current), charge_tariff_out)
-                },
-                Some(last_charge) => {
-                    let (soc_history, soc_current) = get_soc_history(&fox, Some(last_charge.date_time_end))?;
-                    let charge_tariff_out = update_stored_charge_cost(&soc_history, last_charge.charge_tariff_out);
-
-                    (soc_to_available_charge(soc_current), charge_tariff_out)
-                }
-            };
+            let (charge_in, charge_tariff_in, soc_current) = updated_charge_data(&fox, &active_block, &last_charge)?;
             schedule = create_new_schedule(&nordpool, smhi, local_now, charge_in, charge_tariff_in, &backup_dir)?;
             let mut block = schedule.get_block(local_now.hour() as usize)?;
 
@@ -106,7 +100,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
             }
             schedule.update_block_status(local_now.hour() as usize, status.clone());
             if active_block.as_ref().is_some_and(|b| b.is_charge()) {
-                let previous_block = active_block.as_ref().unwrap();
+                let previous_block = active_block.as_mut().unwrap();
+                previous_block.update_block_status(Status::Full(soc_current as usize));
                 last_charge = Some(get_last_charge(previous_block, local_now));
                 save_last_charge(&backup_dir, &last_charge)?;
 
@@ -161,7 +156,7 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
         let _ = retry!(||fox.set_min_soc_on_grid(block.soc_out as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
-        Ok(Status::Full)
+        Ok(Status::Full(soc as usize))
     } else {
         let _ = retry!(||fox.set_max_soc(block.soc_out as u8))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
@@ -187,7 +182,7 @@ fn set_full_if_done(fox: &Fox, max_soc: usize) -> Result<Option<Status>, MyGridW
     let soc= retry!(||fox.get_current_soc())? as usize;
     if soc >= max_soc {
         print_msg("Setting charge block to full", "Update", None);
-        if is_manual_debug()? {return Ok(Some(Status::Full))}
+        if is_manual_debug()? {return Ok(Some(Status::Full(soc)))}
 
         let min_soc = max_soc.max(10).min(100);
 
@@ -195,7 +190,7 @@ fn set_full_if_done(fox: &Fox, max_soc: usize) -> Result<Option<Status>, MyGridW
         let _ = retry!(||fox.set_min_soc_on_grid(min_soc as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
-        Ok(Some(Status::Full))
+        Ok(Some(Status::Full(soc)))
     } else {
         Ok(None)
     }
@@ -287,7 +282,7 @@ pub fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let caption = format!("{} {} ", report_time, caption);
 
-    let mut msg = format!("{:=<179}\n", caption.to_string() + " ");
+    let mut msg = format!("{:=<181}\n", caption.to_string() + " ");
     for s in &schedule.blocks {
         msg += &format!("{}\n", s);
     }
@@ -309,7 +304,7 @@ fn print_msg(message: &str, caption: &str, mail: Option<&Mail>) {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let caption = format!("{} {} ", report_time, caption);
 
-    let msg = format!("{:=<179}\n{}\n", caption.to_string() + " ", message);
+    let msg = format!("{:=<181}\n{}\n", caption.to_string() + " ", message);
     println!("{}", msg);
 
     if let Some(m) = mail {

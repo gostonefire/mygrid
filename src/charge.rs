@@ -1,5 +1,6 @@
+use std::ops::Add;
 use std::thread;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, NaiveTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use crate::errors::MyGridWorkerError;
 use crate::manager_fox_cloud::Fox;
@@ -49,10 +50,16 @@ struct Value {
 ///
 /// * 'fox' - reference to the Fox struct
 /// * 'start_time' - the start time for the history, if None given then no history is returned, just current SoC
-pub fn get_soc_history(fox: &Fox, start_time: Option<DateTime<Local>>) -> Result<(Vec<u8>, u8), MyGridWorkerError> {
+fn get_soc_history(fox: &Fox, start_time: Option<DateTime<Local>>) -> Result<(Vec<u8>, u8), MyGridWorkerError> {
     let mut soc_history: Vec<u8> = if let Some(start_time) = start_time {
-        let start = start_time.with_timezone(&Utc);
+
+        let mut start = start_time.with_timezone(&Utc);
         let end =  Local::now().with_timezone(&Utc);
+        if end - start >= TimeDelta::hours(24) {
+            start = end
+                .add(TimeDelta::hours(-24))
+                .add(TimeDelta::seconds(1))
+        }
         let device_history = retry!(||fox.get_device_history_data(start, end))?;
         device_history.soc
     } else {
@@ -70,7 +77,7 @@ pub fn get_soc_history(fox: &Fox, start_time: Option<DateTime<Local>>) -> Result
 /// # Arguments
 ///
 /// * 'soc' - the state of charge as reported from Fox, i.e. including the 10 not usable
-pub fn soc_to_available_charge(soc: u8) -> f64 {
+fn soc_to_available_charge(soc: u8) -> f64 {
     (soc.max(10) - 10) as f64 * SOC_KWH
 }
 
@@ -90,6 +97,41 @@ pub fn get_last_charge(charge_block: &Block, date_time: DateTime<Local>) -> Last
         charge_out: charge_block.charge_out,
         charge_tariff_in: charge_block.charge_tariff_in,
         charge_tariff_out: charge_block.charge_tariff_out,
+    }
+}
+
+/// Calculate updated charge related values for resent charge-from-grid blocks
+///
+/// # Arguments
+///
+/// * 'fox' - reference to the Fox struct
+/// * 'active_block' - the block that was active to be used if last charge isn't provided
+/// * 'last_charge' - data from the last finished charge from grid
+pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge: &Option<LastCharge>) -> Result<(f64, f64, u8), MyGridWorkerError> {
+    match last_charge {
+        None => {
+            let (charge_tariff_out, soc_current) = match active_block {
+                None => {
+                    let (_, soc_current) = get_soc_history(&fox, None)?;
+                    (0.0, soc_current)
+                },
+                Some(b) => {
+                    let start = b.date
+                        .and_time(NaiveTime::from_hms_opt(b.start_hour as u32, 0, 0).unwrap())
+                        .and_local_timezone(Local).unwrap();
+                    let (soc_history, soc_current) = get_soc_history(&fox, Some(start))?;
+                    let charge_tariff_out = update_stored_charge_cost(&soc_history, b.charge_tariff_in);
+                    (charge_tariff_out, soc_current)
+                }
+            };
+            Ok((soc_to_available_charge(soc_current), charge_tariff_out, soc_current))
+        },
+        Some(last_charge) => {
+            let (soc_history, soc_current) = get_soc_history(&fox, Some(last_charge.date_time_end))?;
+            let charge_tariff_out = update_stored_charge_cost(&soc_history, last_charge.charge_tariff_out);
+
+            Ok((soc_to_available_charge(soc_current), charge_tariff_out, soc_current))
+        }
     }
 }
 
@@ -154,18 +196,24 @@ pub fn update_stored_charge_cost(soc_history: &Vec<u8>, charge_tariff_in: f64) -
             _ => (),
         }
 
-        // Store value form input if we detected a peaks or a valley
+        // Store value from input if we detected a peak or a valley
         if cmd != ValueType::NA {
             peaks_valleys.push(Value { value_type: cmd, value: soc_history[s] });
         }
     }
 
     // Calculate tariff (what the stored energy has cost us per kWh) after blending in free power from PV
-    for (i, v) in peaks_valleys.iter().enumerate() {
-        if v.value_type == ValueType::Peak && i > 0 {
-            charge_tariff_out = peaks_valleys[i-1].value as f64 * charge_tariff_out / v.value as f64;
+    // if there is any peak or valley that hits battery min soc (10) then the charge tariff out must
+    // be 0.0 since no more usable charge with positive tariff exists.
+    if peaks_valleys.iter().any(|v| v.value <= 10) {
+        0.0
+    } else {
+        for (i, v) in peaks_valleys.iter().enumerate() {
+            if v.value_type == ValueType::Peak && i > 0 {
+                charge_tariff_out = peaks_valleys[i-1].value as f64 * charge_tariff_out / v.value as f64;
+            }
         }
-    }
 
-    charge_tariff_out
+        charge_tariff_out
+    }
 }

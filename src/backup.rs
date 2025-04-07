@@ -96,7 +96,9 @@ pub fn save_last_charge(backup_dir: &str, last_charge: &Option<LastCharge>) -> R
 }
 
 /// Loads data about the last charge made from grid to battery.
-/// If none is found or if the data is older than 12 hours then None is returned
+/// If none is found or if the data is older than 23 hours then None is returned.
+/// 23 hours since getting device history data is limited to max 23 hours, 59minutes and 59 seconds.
+/// By choosing 23 hours sharp gives some wiggle room and easier calculation later on.
 ///
 /// # Arguments
 ///
@@ -109,7 +111,7 @@ pub fn load_last_charge(backup_dir: &str) -> Result<Option<LastCharge>, BackupEr
         let json = fs::read_to_string(path)?;
         let last_charge: LastCharge = serde_json::from_str(&json)?;
 
-        if Local::now() - last_charge.date_time_end <= TimeDelta::hours(12) {
+        if Local::now() - last_charge.date_time_end <= TimeDelta::hours(23) {
             return Ok(Some(last_charge))
         }
     }
