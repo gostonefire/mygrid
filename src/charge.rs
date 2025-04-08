@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::errors::MyGridWorkerError;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper};
-use crate::scheduling::{Block, SOC_KWH};
+use crate::backup::save_last_charge;
+use crate::scheduling::{Block, Status, SOC_KWH};
 
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -81,6 +82,29 @@ fn soc_to_available_charge(soc: u8) -> f64 {
     (soc.max(10) - 10) as f64 * SOC_KWH
 }
 
+/// Updates last charge in case the active block is a charge block, otherwise it just
+/// returns the same last charge as was given in the call
+/// # Arguments
+///
+/// * 'fox' - reference to the Fox struct
+/// * 'backup_dir' - the directory to save the new last charge to
+/// * 'active_block' - the block that was or is active
+/// * 'last_charge' - data from the last finished charge from grid
+/// * 'date_time' - date time to stamp as the end of the last charge
+pub fn update_last_charge(fox: &Fox, backup_dir: &str, active_block: &mut Option<Block>, last_charge: Option<LastCharge>, date_time: DateTime<Local>) -> Result<Option<LastCharge>, MyGridWorkerError> {
+    if active_block.as_ref().is_some_and(|b| b.is_charge()) {
+        let (_, soc_current) = get_soc_history(fox, None)?;
+        let block = active_block.as_mut().unwrap();
+        block.update_block_status(Status::Full(soc_current as usize));
+        let new_last_charge = Some(get_last_charge(block, date_time));
+        save_last_charge(backup_dir, &new_last_charge)?;
+
+        Ok(new_last_charge)
+    } else {
+        Ok(last_charge)
+    }
+}
+
 /// Copies in data from last charging block into a LastCharge struct and stamps it
 /// with the time the charging actually ended
 ///
@@ -107,7 +131,7 @@ pub fn get_last_charge(charge_block: &Block, date_time: DateTime<Local>) -> Last
 /// * 'fox' - reference to the Fox struct
 /// * 'active_block' - the block that was active to be used if last charge isn't provided
 /// * 'last_charge' - data from the last finished charge from grid
-pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge: &Option<LastCharge>) -> Result<(f64, f64, u8), MyGridWorkerError> {
+pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge: &Option<LastCharge>) -> Result<(f64, f64), MyGridWorkerError> {
     match last_charge {
         None => {
             let (charge_tariff_out, soc_current) = match active_block {
@@ -124,13 +148,13 @@ pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge:
                     (charge_tariff_out, soc_current)
                 }
             };
-            Ok((soc_to_available_charge(soc_current), charge_tariff_out, soc_current))
+            Ok((soc_to_available_charge(soc_current), charge_tariff_out))
         },
         Some(last_charge) => {
             let (soc_history, soc_current) = get_soc_history(&fox, Some(last_charge.date_time_end))?;
             let charge_tariff_out = update_stored_charge_cost(&soc_history, last_charge.charge_tariff_out);
 
-            Ok((soc_to_available_charge(soc_current), charge_tariff_out, soc_current))
+            Ok((soc_to_available_charge(soc_current), charge_tariff_out))
         }
     }
 }

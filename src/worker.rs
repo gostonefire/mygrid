@@ -5,7 +5,7 @@ use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics};
-use crate::charge::{get_last_charge, updated_charge_data, LastCharge};
+use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, LastCharge};
 use crate::errors::{MyGridWorkerError};
 use crate::manager_mail::Mail;
 use crate::scheduling::{create_new_schedule, Block, BlockType, Schedule, Status};
@@ -67,14 +67,11 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
         }
 
         // This is the main mode selector given a new schedule after every finished block
-        // It first checks if there is any stored last_charge struct, in which chase it can
-        // use that to calculate the new charge tariff per stored kWh. Otherwise, it uses the previous
-        // active block to get the estimated charge tariff per stored kWh. As a last resort it just
-        // has to assume 0.0.
-        // Regardless it always fetches the current soc from the inverter as charge in for the
-        // schedule to be calculated and created.
         if !active_block.as_ref().is_some_and(|b| b.is_active(local_now)) {
-            let (charge_in, charge_tariff_in, soc_current) = updated_charge_data(&fox, &active_block, &last_charge)?;
+
+            last_charge = update_last_charge(&fox, &backup_dir, &mut active_block, last_charge, local_now)?;
+            let (charge_in, charge_tariff_in) = updated_charge_data(&fox, &active_block, &last_charge)?;
+
             schedule = create_new_schedule(&nordpool, smhi, local_now, charge_in, charge_tariff_in, &backup_dir)?;
             let mut block = schedule.get_block(local_now.hour() as usize)?;
 
@@ -99,13 +96,6 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
                 },
             }
             schedule.update_block_status(local_now.hour() as usize, status.clone());
-            if active_block.as_ref().is_some_and(|b| b.is_charge()) {
-                let previous_block = active_block.as_mut().unwrap();
-                previous_block.update_block_status(Status::Full(soc_current as usize));
-                last_charge = Some(get_last_charge(previous_block, local_now));
-                save_last_charge(&backup_dir, &last_charge)?;
-
-            }
             block.update_block_status(status);
             save_active_block(&backup_dir, &block)?;
             active_block = Some(block);
