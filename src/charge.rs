@@ -139,13 +139,18 @@ pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge:
                     let (_, soc_current) = get_soc_history(&fox, None)?;
                     (0.0, soc_current)
                 },
-                Some(b) => {
+                Some(b) if b.charge_tariff_in > 0.0 => {
                     let start = b.date
                         .and_time(NaiveTime::from_hms_opt(b.start_hour as u32, 0, 0).unwrap())
                         .and_local_timezone(Local).unwrap();
                     let (soc_history, soc_current) = get_soc_history(&fox, Some(start))?;
                     let charge_tariff_out = update_stored_charge_cost(&soc_history, b.charge_tariff_in);
                     (charge_tariff_out, soc_current)
+
+                },
+                _ => {
+                    let (_, soc_current) = get_soc_history(&fox, None)?;
+                    (0.0, soc_current)
                 }
             };
             Ok((soc_to_available_charge(soc_current), charge_tariff_out))
