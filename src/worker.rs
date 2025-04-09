@@ -16,7 +16,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
 
     let mut schedule: Schedule;
     let mut charge_check_done: DateTime<Local> = DateTime::default();
-    let mut local_now = Local::now();
+    let mut local_now: DateTime<Local>;
     let mut day_of_year: Option<u32> = None;
 
     loop {
