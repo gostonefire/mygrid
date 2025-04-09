@@ -17,7 +17,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
     let mut schedule: Schedule;
     let mut charge_check_done: DateTime<Local> = DateTime::default();
     let mut local_now = Local::now();
-    let mut day_of_year = local_now.ordinal0();
+    let mut day_of_year: Option<u32> = None;
 
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
@@ -33,11 +33,10 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
         }
 
         // Check inverter time and save some stats once every day, hour 15 is arbitrary
-        if day_of_year != local_now.ordinal0() && local_now.hour() >= 15 {
-
+        if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != local_now.ordinal0())) && local_now.hour() >= 15 {
             check_inverter_local_time(&fox)?;
             save_yesterday_statistics(&stats_dir, &fox)?;
-            day_of_year = local_now.ordinal0();
+            day_of_year = Some(local_now.ordinal0());
         }
 
         // Reset last_charge if it is older than 23 hours
