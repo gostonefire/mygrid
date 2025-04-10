@@ -145,6 +145,7 @@ impl Block {
                 }
                 self.soc_out = soc;
                 self.charge_out = (soc - 10) as f64 * SOC_KWH;
+                self.charge_tariff_out = self.charge_tariff_in;
             }
         }
         self.status = status;
