@@ -11,7 +11,7 @@ use crate::manager_mail::Mail;
 use crate::scheduling::{create_new_schedule, Block, BlockType, Schedule, Status};
 use crate::manual::check_manual;
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Option<Block>, mut last_charge: Option<LastCharge>, backup_dir: String, stats_dir: String, manual_file: String)
+pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], mut active_block: Option<Block>, mut last_charge: Option<LastCharge>, backup_dir: String, stats_dir: String, manual_file: String)
            -> Result<(), MyGridWorkerError> {
 
     let mut schedule: Schedule;
@@ -71,7 +71,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, mut active_block: Opti
             last_charge = update_last_charge(&fox, &backup_dir, &mut active_block, last_charge, local_now)?;
             let (charge_in, charge_tariff_in) = updated_charge_data(&fox, &active_block, &last_charge)?;
 
-            schedule = create_new_schedule(&nordpool, smhi, local_now, charge_in, charge_tariff_in, &backup_dir)?;
+            schedule = create_new_schedule(&nordpool, smhi, pv_diagram, local_now, charge_in, charge_tariff_in, &backup_dir)?;
             let mut block = schedule.get_block(local_now.hour() as usize)?;
 
             let status: Status;

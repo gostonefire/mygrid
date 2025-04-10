@@ -20,8 +20,9 @@ pub fn get_declination(date: DateTime<Local>) -> f64 {
     declination
 }
 
-/// Calculates the sun elevation given the algorithm as described
-/// here: https://www.pveducation.org/pvcdrom/properties-of-sunlight/elevation-angle
+/// Calculates the sun elevation and azimuth given the algorithm as described here:
+/// * https://www.pveducation.org/pvcdrom/properties-of-sunlight/elevation-angle
+/// * https://www.pveducation.org/pvcdrom/properties-of-sunlight/azimuth-angle
 ///
 /// # Arguments
 ///
@@ -29,7 +30,7 @@ pub fn get_declination(date: DateTime<Local>) -> f64 {
 /// * 'lat' - the latitude given in decimal format
 /// * 'long' - the longitude given in decimal format
 /// * 'declination' - the current sun declination
-pub fn get_elevation(date: DateTime<Local>, lat: f64, long: f64, declination: f64) -> f64 {
+pub fn get_elevation_and_azimuth(date: DateTime<Local>, lat: f64, long: f64, declination: f64) -> (f64, f64) {
     let lstm = 15.0 * (date.offset().local_minus_utc() / 3600) as f64;
     let b = 360.0 / 365.0 * (date.ordinal0() as f64 - 81.0);
     let eot = 9.87 * (2.0 * b).sind() - 7.53 * b.cosd() - 1.5 * b.sind();
@@ -37,6 +38,12 @@ pub fn get_elevation(date: DateTime<Local>, lat: f64, long: f64, declination: f6
     let lst = date.hour() as f64 + date.minute() as f64 / 60.0 + tc / 60.0;
     let hra = 15.0 * (lst - 12.0);
 
-    (declination.sind() * lat.sind() + declination.cosd() * lat.cosd() * hra.cosd()).asind()
-}
+    let elev = (declination.sind() * lat.sind() + declination.cosd() * lat.cosd() * hra.cosd()).asind();
 
+    let mut azi = ((declination.sind() * lat.cosd() - declination.cosd() * lat.sind() * hra.cosd()) / elev.cosd()).acosd();
+    if hra > 0.0 {
+        azi = 360.0 - azi;
+    }
+
+    (elev, azi)
+}

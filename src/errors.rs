@@ -126,7 +126,11 @@ impl From<FoxError> for BackupError {
         BackupError(e.to_string())
     }
 }
-
+impl From<&str> for BackupError {
+    fn from(e: &str) -> Self {
+        BackupError(e.to_string())
+    }
+}
 
 /// Error depicting errors that occur while creating and managing schedules
 ///

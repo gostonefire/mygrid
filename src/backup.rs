@@ -22,6 +22,11 @@ pub struct BaseData {
     consumption: [f64; 24],
 }
 
+#[derive(Deserialize)]
+struct PVDiagram {
+    pv_data: Vec<f64>,
+}
+
 /// Saves base data used in the creation of a schedule if time is not in the future
 ///
 /// # Arguments
@@ -156,6 +161,35 @@ pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result
     }
 
     Ok(None)
+}
+
+/// Loads PV Diagram data
+///
+/// # Arguments
+///
+/// * 'config_dir' - the directory where to find config files
+pub fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], BackupError> {
+    let file_path = format!("{}pv_diagram.json", config_dir);
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let mut result: [f64;1440] = [0.0;1440];
+
+        let json = fs::read_to_string(path)?;
+        let pv_diagram: PVDiagram = serde_json::from_str(&json)?;
+
+        if pv_diagram.pv_data.len() != 1440 {
+            return Err(BackupError::from("PV diagram length mismatch"))
+        }
+
+        for (i, p) in pv_diagram.pv_data.iter().enumerate() {
+            result[i] = *p;
+        }
+
+        Ok(result)
+    } else {
+        Err(BackupError::from("PV diagram file not found"))
+    }
 }
 
 /// Gat and saves statistics from yesterday

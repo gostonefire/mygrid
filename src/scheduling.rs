@@ -777,9 +777,9 @@ fn add_vat_markup(tariff: f64) -> (f64, f64) {
 /// * 'charge_in' - residual charge from previous block
 /// * 'charge_tariff_in' - mean tariff for residual charge
 /// * 'backup_dir' - the path to the backup directory
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
-    let production = PVProduction::new(&forecast, LAT, LONG);
+    let production = PVProduction::new(&forecast, LAT, LONG, pv_diagram, date_time);
     let consumption = Consumption::new(&forecast);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
     let schedule = Schedule::new_with_scheduling(date_time.hour() as usize, &tariffs, &production, &consumption, charge_in, charge_tariff_in, date_time);
