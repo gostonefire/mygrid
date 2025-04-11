@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Formatter;
 use std::thread;
-use chrono::{DateTime, Local, NaiveDate, Timelike};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::Consumption;
 use crate::production::PVProduction;
@@ -774,14 +774,16 @@ fn add_vat_markup(tariff: f64) -> (f64, f64) {
 ///
 /// * 'nordpool' - reference to a NordPool struct
 /// * 'smhi' - reference to a SMHI struct
+/// * 'pv_diagram' - normalized PV production curve
+/// * 'consumption_diagram' - daily household consumption not considering house heating
 /// * 'date_time' - the date for which the schedule shall be created
 /// * 'charge_in' - residual charge from previous block
 /// * 'charge_tariff_in' - mean tariff for residual charge
 /// * 'backup_dir' - the path to the backup directory
-pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
+pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], consumption_diagram: [[f64;24];7], date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG, pv_diagram, date_time);
-    let consumption = Consumption::new(&forecast);
+    let consumption = Consumption::new(&forecast, consumption_diagram, date_time.weekday().num_days_from_monday());
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
     let schedule = Schedule::new_with_scheduling(date_time.hour() as usize, &tariffs, &production, &consumption, charge_in, charge_tariff_in, date_time);
     save_base_data(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption())?;

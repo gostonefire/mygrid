@@ -2,7 +2,7 @@ use std::env;
 use std::str::FromStr;
 use chrono::Local;
 use crate::{DEBUG_MODE, LAT, LONG};
-use crate::backup::{load_base_data, load_last_charge, load_active_block, load_pv_diagram};
+use crate::backup::{load_base_data, load_last_charge, load_active_block, load_pv_diagram, load_consumption_diagram};
 use crate::charge::LastCharge;
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
@@ -13,7 +13,7 @@ use crate::scheduling::Block;
 
 /// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], Option<Block>, Option<LastCharge>, String, String, String), MyGridInitError> {
+pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], [[f64;24];7], Option<Block>, Option<LastCharge>, String, String, String), MyGridInitError> {
     let api_key = env::var("FOX_ESS_API_KEY")
         .expect("Error getting FOX_ESS_API_KEY");
     let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
@@ -51,6 +51,7 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], Option<Block>, O
     let mail = Mail::new(mail_api_key, mail_from, mail_to)?;
 
     let pv_diagram = load_pv_diagram(&config_dir)?;
+    let consumption_diagram = load_consumption_diagram(&config_dir)?;
 
     let local_now = Local::now();
     let last_charge = load_last_charge(&backup_dir)?;
@@ -59,5 +60,5 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], Option<Block>, O
         smhi.set_forecast(base_data.forecast);
     }
 
-    Ok((fox, nordpool, smhi, mail, pv_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file))
+    Ok((fox, nordpool, smhi, mail, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file))
 }

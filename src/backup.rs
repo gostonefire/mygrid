@@ -27,6 +27,11 @@ struct PVDiagram {
     pv_data: Vec<f64>,
 }
 
+#[derive(Deserialize)]
+pub struct ConsumptionDiagram {
+    pub day: [[f64; 24];7],
+}
+
 /// Saves base data used in the creation of a schedule if time is not in the future
 ///
 /// # Arguments
@@ -189,6 +194,25 @@ pub fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], BackupError> {
         Ok(result)
     } else {
         Err(BackupError::from("PV diagram file not found"))
+    }
+}
+
+/// Loads consumption diagram configuration
+///
+/// # Arguments
+///
+/// * 'config_dir' - the directory where to find config files
+pub fn load_consumption_diagram(config_dir: &str) -> Result<[[f64;24];7], BackupError> {
+    let file_path = format!("{}consumption_diagram.json", config_dir);
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let json = fs::read_to_string(path)?;
+        let consumption_diagram: ConsumptionDiagram = serde_json::from_str(&json)?;
+
+        Ok(consumption_diagram.day)
+    } else {
+        Err(BackupError::from("consumption diagram file not found"))
     }
 }
 

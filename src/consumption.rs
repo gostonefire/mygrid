@@ -19,9 +19,11 @@ impl Consumption {
     /// # Arguments
     ///
     /// * 'forecast' - whether forecast including temperatures per hour
-    pub fn new(forecast: &[TimeValues;24]) -> Consumption {
+    /// * 'consumption_diagram' - daily household consumption not considering house heating
+    /// * 'week_day' - day of week to create estimated consumption for
+    pub fn new(forecast: &[TimeValues;24], consumption_diagram: [[f64;24];7], week_day: u32) -> Consumption {
         let mut consumption = Consumption { hours: [0.0;24] };
-        consumption.calculate_consumption(forecast);
+        consumption.calculate_consumption(forecast, consumption_diagram[week_day as usize]);
 
         consumption
     }
@@ -39,14 +41,15 @@ impl Consumption {
     /// # Arguments
     ///
     /// * 'forecast' - the temperature forecast
-    fn calculate_consumption(&mut self, forecast: &[TimeValues;24]) {
+    /// * 'day_consumption' - estimated household consumption for the day to calculate
+    fn calculate_consumption(&mut self, forecast: &[TimeValues;24], day_consumption: [f64;24]) {
         let mut hour_load: [f64;24] = [0.0;24];
 
         for (h, v) in forecast.iter().enumerate() {
             let temp = v.temp.max(0.0).min(20.0);
             let load_factor = (20.0 - temp).powi(5) / 20.0_f64.powi(5);
             let load = load_factor * (MAX_AVG_LOAD - MIN_AVG_LOAD) + MIN_AVG_LOAD;
-            hour_load[h] = load;
+            hour_load[h] = load + day_consumption[h];
         }
 
         self.hours = hour_load;

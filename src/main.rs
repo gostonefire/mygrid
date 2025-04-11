@@ -40,15 +40,15 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, mut smhi, mail, pv_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) = match init() {
-            Ok((f, n, s, m, pv, ab, lc, b, st, mf)) => (f, n, s, m, pv, ab, lc, b, st, mf),
+        let (fox, nordpool, mut smhi, mail, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) = match init() {
+            Ok((f, n, s, m, pv, c, ab, lc, b, st, mf)) => (f, n, s, m, pv, c, ab, lc, b, st, mf),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
                 continue;
             }
         };
 
-        match run(fox, nordpool, &mut smhi, pv_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) {
+        match run(fox, nordpool, &mut smhi, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) {
             Ok(()) => return,
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mail));
