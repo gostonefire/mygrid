@@ -66,7 +66,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
         }
 
         // This is the main mode selector given a new schedule after every finished block
-        if !active_block.as_ref().is_some_and(|b| b.is_active(local_now)) {
+        if is_update_time(&active_block, local_now) {
 
             last_charge = update_last_charge(&fox, &backup_dir, &mut active_block, last_charge, local_now)?;
             let (charge_in, charge_tariff_in) = updated_charge_data(&fox, &active_block, &last_charge)?;
@@ -101,6 +101,31 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
 
             print_schedule(&schedule,"Update", None);
         }
+    }
+}
+
+/// Returns true if it is time to update the schedule.
+/// This can happen in two occasions:
+/// * When the active block is done (it has passed its end hour), or doesn't exist ar all
+/// * When the active block has been running for 4 hours (or more), and is not a charge block
+///
+/// Reason for ending an active block prematurely is that PV power and consumption are estimates
+/// given SMHI forecasts on cloud and temperature predictions (which often are inaccurate), and
+/// the consumption can vary a lot depending on e.g. cooking and taking showers. Also, the base
+/// consumption curve regarding heating is indeed a curve but in practise goes up and down
+/// rather unpredictable.
+///
+/// # Arguments
+///
+/// * 'active_block' - the block being currently active
+/// * 'date_time'- the current date and time
+fn is_update_time(active_block: &Option<Block>, date_time: DateTime<Local>) -> bool {
+    if !active_block.as_ref().is_some_and(|b| b.is_active(date_time)) {
+        true
+    } else if active_block.as_ref().is_some_and(|b| { !b.is_charge() && date_time.hour() as usize - b.start_hour >= 4 }) {
+        true
+    } else {
+        false
     }
 }
 
