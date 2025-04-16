@@ -738,7 +738,9 @@ fn correct_overflow(charge: f64) -> (f64, f64) {
 fn split_tariffs(tariffs: &Vec<f64>) -> Tariffs {
     let mut buy: [f64;24] = [0.0;24];
     let mut sell: [f64;24] = [0.0;24];
-    tariffs.iter().enumerate().for_each(|(i, &t)| (buy[i], sell[i]) = add_vat_markup(t));
+    tariffs.iter().enumerate()
+        .filter(|(i, _)| *i < 24 )
+        .for_each(|(i, &t)| (buy[i], sell[i]) = add_vat_markup(t));
 
     Tariffs { buy, sell, }
 }

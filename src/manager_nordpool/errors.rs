@@ -6,6 +6,7 @@ use ureq::Error;
 pub enum NordPoolError {
     NordPool(String),
     Document(String),
+    NoContent,
 }
 
 impl fmt::Display for NordPoolError {
@@ -13,6 +14,7 @@ impl fmt::Display for NordPoolError {
         match self {
             NordPoolError::NordPool(e) => write!(f, "NordPoolError::NordPool: {}", e),
             NordPoolError::Document(e) => write!(f, "NordPoolError::Document: {}", e),
+            NordPoolError::NoContent           => write!(f, "NordPoolError::NoContent"),
         }
     }
 }
