@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
+use serde::Serialize;
 use crate::{manager_sun};
-use crate::models::smhi_forecast::TimeValues;
+use crate::models::smhi_forecast::ForecastValues;
 
 /// Max expected mean output from PV in watts during one hour
 const MAX_PV_POWER: f64 = 6000.0;
@@ -24,12 +25,18 @@ const SUNRISE_ANGLE: f64 = 0.0;
 /// Sun elevation angle from where sunset time is calculated
 const SUNSET_ANGLE: f64 = 0.0;
 
+#[derive(Clone, Serialize)]
+pub struct ProductionValues {
+    pub valid_time: DateTime<Local>,
+    pub power: f64
+}
+
 /// Struct for calculating and holding PV production per hour given a whether forecast
 ///
 /// The implementation includes business logic for the factor between sun elevation and
 /// cloud index. This business logic is implemented in the get_production_factor function.
 pub struct PVProduction {
-    hours: [f64;24],
+    production: Vec<ProductionValues>,
     lat: f64,
     long: f64,
     pv_diagram: [f64; 1440],
@@ -45,16 +52,16 @@ impl PVProduction {
     /// * 'long' - longitude for the point where the PV plant is
     /// * 'pv_diagram' - a normalized PV power output diagram from sunrise to sunset
     /// * 'date_time' - the date to calculate for
-    pub fn new(forecast: &[TimeValues;24], lat: f64, long: f64, pv_diagram: [f64;1440], date_time: DateTime<Local>) -> PVProduction {
-        let mut pv_prod = PVProduction { hours: [0.0;24], lat, long, pv_diagram };
+    pub fn new(forecast: &Vec<ForecastValues>, lat: f64, long: f64, pv_diagram: [f64;1440], date_time: DateTime<Local>) -> PVProduction {
+        let mut pv_prod = PVProduction { production: Vec::new(), lat, long, pv_diagram };
         pv_prod.calculate_hour_pv_production(forecast, date_time);
 
         pv_prod
     }
 
     /// Returns the calculated hourly PV production estimates
-    pub fn get_production(&self) -> [f64;24] {
-        self.hours
+    pub fn get_production(&self) -> &Vec<ProductionValues> {
+        &self.production
     }
 
     /// Calculates hourly PV production based on cloud forecast and sun elevations
@@ -63,8 +70,8 @@ impl PVProduction {
     ///
     /// * 'forecast' - the cloud forecast
     /// * 'date_time' - the date time to calculate for
-    fn calculate_hour_pv_production(&mut self, forecast: &[TimeValues;24], date_time: DateTime<Local>) {
-        let mut pv_production: [f64;24] = [0.0;24];
+    fn calculate_hour_pv_production(&mut self, forecast: &Vec<ForecastValues>, date_time: DateTime<Local>) {
+        let mut pv_production: Vec<ProductionValues> = Vec::new();
         let max_south_elev = self.get_max_sun_elevation(SUMMER_SOLSTICE);
         let min_south_elev = self.get_max_sun_elevation(WINTER_SOLSTICE);
         let (day_south_elev, sunrise, sunset) = self.get_sun_extremes((date_time.month(), date_time.day()));
@@ -72,7 +79,7 @@ impl PVProduction {
         let max_day_power = PVProduction::get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
         let factor = 1439.0 / (sunset - sunrise);
 
-        for (h, v) in forecast.iter().enumerate() {
+        for v in forecast.iter() {
             let cloud_factor = PVProduction::get_cloud_factor(v.cloud);
             let mut start = (v.valid_time.hour() * 60) as f64;
             let mut end = start + 59.0;
@@ -94,11 +101,19 @@ impl PVProduction {
                 let sum = self.pv_diagram[start_idx..end_idx].iter().map(|p| p * max_day_power).sum::<f64>();
                 let power = sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor;
 
-                pv_production[h] = power;
+                pv_production.push(ProductionValues{
+                    valid_time: v.valid_time,
+                    power,
+                });
+            } else {
+                pv_production.push(ProductionValues{
+                    valid_time: v.valid_time,
+                    power: 0.0,
+                });
             }
         }
 
-        self.hours = pv_production;
+        self.production = pv_production;
     }
 
     /// Calculates the top sun power production given the sun top elevation for the day

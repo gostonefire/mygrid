@@ -2,10 +2,10 @@ pub mod errors;
 
 use std::ops::Add;
 use std::time::Duration;
-use chrono::{DateTime, Local, TimeDelta, Timelike};
+use chrono::{DateTime, DurationRound, Local, TimeDelta};
 use ureq::Agent;
 use crate::manager_nordpool::errors::NordPoolError;
-use crate::models::nordpool_tariffs::Tariffs;
+use crate::models::nordpool_tariffs::{TariffValues, Tariffs};
 
 
 pub struct NordPool {
@@ -31,7 +31,7 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'date_time' - the date to retrieve prices for
-    pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<f64>, NordPoolError> {
+    pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<TariffValues>, NordPoolError> {
         let mut result = self.get_day_tariffs(date_time)?;
         if let Ok(next_day) = self.get_day_tariffs(date_time.add(TimeDelta::days(1))) {
             result.extend(next_day);
@@ -45,7 +45,7 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'date_time' - the date to retrieve prices for
-    fn get_day_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<f64>, NordPoolError> {
+    fn get_day_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<TariffValues>, NordPoolError> {
         let url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices";
         let date = format!("{}", date_time.format("%Y-%m-%d"));
         let query = vec![
@@ -78,16 +78,19 @@ impl NordPool {
     /// # Arguments
     ///
     /// * 'tariffs' - the struct containing prices
-    fn tariffs_to_vec(tariffs: &Tariffs) -> Result<Vec<f64>, NordPoolError> {
+    fn tariffs_to_vec(tariffs: &Tariffs) -> Result<Vec<TariffValues>, NordPoolError> {
         if tariffs.multi_area_entries.len() != 24 {
             return Err(NordPoolError::from("number of day tariffs not equal to 24"))
         }
 
-        let mut result: Vec<f64> = vec![0.0;24];
+        let mut result: Vec<TariffValues> = Vec::new();
         tariffs.multi_area_entries.iter().for_each(
             |t| {
                 let sek_per_kwh = (t.entry_per_area.se4 / 10f64).round() / 100f64;
-                result[t.delivery_start.hour() as usize] = sek_per_kwh;
+                result.push(TariffValues{
+                    valid_time: t.delivery_start.duration_trunc(TimeDelta::hours(1)).unwrap(),
+                    price: sek_per_kwh
+                });
             });
 
         Ok(result)

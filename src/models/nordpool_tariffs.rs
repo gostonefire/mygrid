@@ -1,5 +1,5 @@
 use chrono::{Local};
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::chrono::DateTime;
 
 #[derive(Deserialize, Debug)]
@@ -22,3 +22,8 @@ pub struct Tariffs {
     pub multi_area_entries: Vec<MultiAreaEntries>,
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct TariffValues {
+    pub valid_time: DateTime<Local>,
+    pub price: f64,
+}

@@ -4,22 +4,24 @@ use std::io::Write;
 use std::ops::Add;
 use std::path::Path;
 use std::thread;
-use chrono::{DateTime, Datelike, DurationRound, Local, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
-use crate::models::smhi_forecast::TimeValues;
+use crate::models::smhi_forecast::ForecastValues;
 use crate::{retry, wrapper};
 use crate::charge::LastCharge;
+use crate::consumption::ConsumptionValues;
+use crate::production::ProductionValues;
 use crate::scheduling::{Block};
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct BaseData {
     date_time: DateTime<Local>,
-    pub forecast: [TimeValues; 24],
-    production: [f64; 24],
-    consumption: [f64; 24],
+    forecast: Vec<ForecastValues>,
+    production: Vec<ProductionValues>,
+    consumption: Vec<ConsumptionValues>,
 }
 
 #[derive(Deserialize)]
@@ -44,18 +46,18 @@ pub struct ConsumptionDiagram {
 pub fn save_base_data(
     backup_dir: &str,
     date_time: DateTime<Local>,
-    forecast: [TimeValues; 24],
-    production: [f64; 24],
-    consumption: [f64; 24]) -> Result<(), BackupError> {
+    forecast: &Vec<ForecastValues>,
+    production: &Vec<ProductionValues>,
+    consumption: &Vec<ConsumptionValues>) -> Result<(), BackupError> {
 
     if Local::now().timestamp() >= date_time.timestamp() {
         let file_path = format!("{}base_data.json", backup_dir);
 
         let backup = BaseData {
             date_time,
-            forecast,
-            production,
-            consumption,
+            forecast: forecast.clone(),
+            production: production.clone(),
+            consumption: consumption.clone(),
         };
 
         let json = serde_json::to_string_pretty(&backup)?;
@@ -65,6 +67,7 @@ pub fn save_base_data(
     Ok(())
 }
 
+/*
 /// Loads last saved base data from file
 ///
 /// # Arguments
@@ -86,6 +89,8 @@ pub fn load_base_data(backup_dir: &str, date_time: DateTime<Local>) -> Result<Op
 
     Ok(None)
 }
+
+ */
 
 
 /// Saves data about the last charge from grid to battery
@@ -158,9 +163,8 @@ pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result
         let json = fs::read_to_string(path)?;
         let block: Block = serde_json::from_str(&json)?;
 
-        let date = date_time.date_naive();
-        let hour = date_time.hour() as usize;
-        if block.date == date && hour >= block.start_hour && hour <= block.end_hour {
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
+        if block.start_time <= date_hour && block.end_time >= date_hour {
             return Ok(Some(block))
         }
     }

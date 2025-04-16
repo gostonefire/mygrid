@@ -1,6 +1,6 @@
 use std::ops::Add;
 use std::thread;
-use chrono::{DateTime, Local, NaiveTime, TimeDelta, Utc};
+use chrono::{DateTime, Local, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use crate::errors::MyGridWorkerError;
 use crate::manager_fox_cloud::Fox;
@@ -140,10 +140,7 @@ pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge:
                     (0.0, soc_current)
                 },
                 Some(b) if b.charge_tariff_in > 0.0 => {
-                    let start = b.date
-                        .and_time(NaiveTime::from_hms_opt(b.start_hour as u32, 0, 0).unwrap())
-                        .and_local_timezone(Local).unwrap();
-                    let (soc_history, soc_current) = get_soc_history(&fox, Some(start))?;
+                    let (soc_history, soc_current) = get_soc_history(&fox, Some(b.start_time))?;
                     let charge_tariff_out = update_stored_charge_cost(&soc_history, b.charge_tariff_in);
                     (charge_tariff_out, soc_current)
 

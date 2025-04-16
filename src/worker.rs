@@ -72,7 +72,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
             let (charge_in, charge_tariff_in) = updated_charge_data(&fox, &active_block, &last_charge)?;
 
             schedule = create_new_schedule(&nordpool, smhi, pv_diagram, consumption_diagram, local_now, charge_in, charge_tariff_in, &backup_dir)?;
-            let mut block = schedule.get_block(local_now.hour() as usize)?;
+            let mut block = schedule.get_block(local_now)?;
 
             let status: Status;
             match block.block_type {
@@ -122,7 +122,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
 fn is_update_time(active_block: &Option<Block>, date_time: DateTime<Local>) -> bool {
     if !active_block.as_ref().is_some_and(|b| b.is_active(date_time)) {
         true
-    } else if active_block.as_ref().is_some_and(|b| { !b.is_charge() && date_time.hour() as usize - b.start_hour >= 4 }) {
+    } else if active_block.as_ref().is_some_and(|b| { !b.is_charge() && b.get_age(date_time) >= 4 }) {
         true
     } else {
         false

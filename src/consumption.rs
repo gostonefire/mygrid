@@ -1,4 +1,6 @@
-use crate::models::smhi_forecast::TimeValues;
+use chrono::{DateTime, Datelike, Local, Timelike};
+use serde::Serialize;
+use crate::models::smhi_forecast::ForecastValues;
 
 /// Min average consumption/load in watts over an hour
 const MIN_AVG_LOAD: f64 = 200.0;
@@ -6,12 +8,18 @@ const MIN_AVG_LOAD: f64 = 200.0;
 /// Max average consumption/load in watts over an hour
 const MAX_AVG_LOAD: f64 = 2500.0;
 
+#[derive(Clone, Serialize)]
+pub struct ConsumptionValues {
+    pub valid_time: DateTime<Local>,
+    pub power: f64
+}
+
 /// Struct for calculating and holding Consumption load per hour given a whether forecast
 ///
 /// The business logic is implemented in the calculate_consumption function. Current version is
 /// just an inverse linear proportion between temperature and estimated load.
 pub struct Consumption {
-    hours: [f64;24],
+    consumption: Vec<ConsumptionValues>,
 }
 impl Consumption {
     /// Returns a new Consumption struct with calculated/estimated load levels per hour.
@@ -21,16 +29,16 @@ impl Consumption {
     /// * 'forecast' - whether forecast including temperatures per hour
     /// * 'consumption_diagram' - daily household consumption not considering house heating
     /// * 'week_day' - day of week to create estimated consumption for
-    pub fn new(forecast: &[TimeValues;24], consumption_diagram: [[f64;24];7], week_day: u32) -> Consumption {
-        let mut consumption = Consumption { hours: [0.0;24] };
-        consumption.calculate_consumption(forecast, consumption_diagram[week_day as usize]);
+    pub fn new(forecast: &Vec<ForecastValues>, consumption_diagram: [[f64;24];7]) -> Consumption {
+        let mut consumption = Consumption { consumption: Vec::new() };
+        consumption.calculate_consumption(forecast, consumption_diagram);
 
         consumption
     }
 
     /// Return the hourly calculated consumption estimates
-    pub fn get_consumption(&self) -> [f64;24] {
-        self.hours
+    pub fn get_consumption(&self) -> &Vec<ConsumptionValues> {
+        &self.consumption
     }
 
     /// Calculates hourly household consumption based on temperature forecast
@@ -41,15 +49,18 @@ impl Consumption {
     /// # Arguments
     ///
     /// * 'forecast' - the temperature forecast
-    /// * 'day_consumption' - estimated household consumption for the day to calculate
-    fn calculate_consumption(&mut self, forecast: &[TimeValues;24], day_consumption: [f64;24]) {
-        let mut hour_load: [f64;24] = [0.0;24];
+    ///  * 'consumption_diagram' - daily household consumption not considering house heating
+    fn calculate_consumption(&mut self, forecast: &Vec<ForecastValues>, consumption_diagram: [[f64;24];7]) {
+        let mut hour_load: Vec<ConsumptionValues> = Vec::new();
 
-        for (h, v) in forecast.iter().enumerate() {
-            hour_load[h] = Consumption::consumption_curve(v.temp) + day_consumption[h];
+        for v in forecast.iter() {
+            let week_day = v.valid_time.weekday().num_days_from_monday() as usize;
+            let hour = v.valid_time.hour() as usize;
+            let power = Consumption::consumption_curve(v.temp) + consumption_diagram[week_day][hour];
+            hour_load.push(ConsumptionValues { valid_time: v.valid_time, power });
         }
 
-        self.hours = hour_load;
+        self.consumption = hour_load;
     }
 
     /// Calculates consumption based on temperature over a multiplicative inverse (1/x) curve.

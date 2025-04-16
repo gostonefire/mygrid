@@ -1,17 +1,19 @@
 use std::fmt;
 use std::fmt::Formatter;
 use std::thread;
-use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
+use chrono::{DateTime, DurationRound, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
-use crate::consumption::Consumption;
-use crate::production::PVProduction;
+use crate::consumption::{Consumption, ConsumptionValues};
+use crate::production::{PVProduction, ProductionValues};
 
 use std::collections::HashMap;
+use std::ops::Add;
 use crate::errors::SchedulingError;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, LAT, LONG};
 use crate::backup::save_base_data;
+use crate::models::nordpool_tariffs::TariffValues;
 
 const BAT_CAPACITY: f64 = 16590.0 / 1000.0;
 const BAT_KWH: f64 = BAT_CAPACITY * 0.9;
@@ -25,6 +27,8 @@ const SELL_PRIORITY: f64 = 0.0;
 struct Tariffs {
     buy: [f64;24],
     sell: [f64;24],
+    length: usize,
+    offset: usize,
 }
 
 /// Available block types
@@ -72,7 +76,8 @@ impl fmt::Display for Status {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
     pub block_type: BlockType,
-    pub date: NaiveDate,
+    pub start_time: DateTime<Local>,
+    pub end_time: DateTime<Local>,
     pub start_hour: usize,
     pub end_hour: usize,
     size: usize,
@@ -108,16 +113,28 @@ impl fmt::Display for Block {
 }
 
 impl Block {
+
+    /// Return the age in hours between the blocks start and the given date_time
+    ///
+    /// # Arguments
+    ///
+    /// * 'date_time' - the date time to get age related to
+    pub fn get_age(&self, date_time: DateTime<Local>) -> i64 {
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
+
+
+        (date_hour - self.start_time).num_hours()
+    }
+
     /// Returns true if the block is active in relation to date and time
     ///
     /// # Arguments
     ///
     /// * 'date_time' - the date time the block is valid for
     pub fn is_active(&self, date_time: DateTime<Local>) -> bool {
-        let date = date_time.date_naive();
-        let hour = date_time.hour() as usize;
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
 
-        self.date == date && hour >= self.start_hour && hour <= self.end_hour
+        date_hour >= self.start_time && date_hour <= self.end_time
     }
 
     /// Returns true if the block is a started charge block and not prematurely stopped
@@ -139,7 +156,7 @@ impl Block {
                 if soc > self.soc_in {
                     let tariffs = self.tariffs.as_ref().unwrap();
                     let charge_in_bat = (soc - self.soc_in) as f64 * SOC_KWH;
-                    let (cost, _) = charge_cost_charge_end(self.start_hour, charge_in_bat / CHARGE_EFFICIENCY, tariffs);
+                    let (cost, _) = charge_cost_charge_end(self.start_hour - tariffs.offset, charge_in_bat / CHARGE_EFFICIENCY, tariffs);
                     let charge_tariff = cost / charge_in_bat;
                     self.charge_tariff_out = ((self.soc_in - 10) as f64 * self.charge_tariff_in + (soc - self.soc_in) as f64 * charge_tariff) / (soc - 10) as f64;
                 }
@@ -179,28 +196,43 @@ impl Schedule {
     ///
     /// # Arguments
     ///
-    /// * 'start' - start hour for the schedule to be created
     /// * 'tariffs' - tariffs as given from NordPool
     /// * 'production' - production estimates per hour
     /// * 'consumption' - consumption estimates per hour
     /// * 'charge_in' - any residual charge to bear in to the new schedule
     /// * 'charge_tariff_in' - the mean price for the residual price
     /// * 'date_time' - the date time to stamp on the schedule
-    pub fn new_with_scheduling(start: usize, tariffs: &Vec<f64>, production: &PVProduction, consumption: &Consumption, charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Schedule {
-        let prod = production.get_production();
-        let cons = consumption.get_consumption();
+    pub fn new_with_scheduling(tariffs: &Vec<TariffValues>, production: &Vec<ProductionValues>, consumption: &Vec<ConsumptionValues>, charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Schedule {
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
+        let tariffs_in_scope: Vec<f64> = tariffs.iter()
+            .filter(|t|t.valid_time >= date_hour && t.valid_time < date_hour.add(TimeDelta::days(1)))
+            .map(|t|t.price)
+            .collect::<Vec<f64>>();
+
+        let mut prod: [f64;24] = [0.0; 24];
+        production.iter()
+            .enumerate()
+            .filter(|(_, p)|p.valid_time >= date_hour && p.valid_time < date_hour.add(TimeDelta::days(1)))
+            .for_each(|(i, p)| prod[i] = p.power);
+
+        let mut cons: [f64;24] = [0.0; 24];
+        consumption.iter()
+            .enumerate()
+            .filter(|(_, c)|c.valid_time >= date_hour && c.valid_time < date_hour.add(TimeDelta::days(1)))
+            .for_each(|(i, p)| cons[i] = p.power);
+
         let mut net_prod: [f64;24] = [0.0;24];
         prod.iter()
             .enumerate()
             .for_each(|(i, &p)| net_prod[i] = (p - cons[i]) / 1000.0);
 
-        let tariffs = split_tariffs(&tariffs);
+        let tariffs = split_tariffs(&tariffs_in_scope, date_hour.hour() as usize);
 
-        let blocks = seek_best(start, &tariffs, net_prod, charge_in, charge_tariff_in, date_time);
+        let blocks = seek_best(&tariffs, net_prod, charge_in, charge_tariff_in, date_time);
 
         Schedule {
             date: date_time,
-            blocks: blocks.blocks,
+            blocks: adjust_for_offset(blocks.blocks, date_hour.hour() as usize),
             tariffs,
         }
     }
@@ -224,16 +256,42 @@ impl Schedule {
     ///
     /// # Arguments
     ///
-    /// * 'hour' - the hour to get a block for
-    pub fn get_block(&self, hour: usize) -> Result<Block, SchedulingError> {
+    /// * 'date_time' - the time to get a block for
+    pub fn get_block(&self, date_time: DateTime<Local>) -> Result<Block, SchedulingError> {
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
         for b in self.blocks.iter() {
-            if b.start_hour <= hour && b.end_hour >= hour {
+            if b.start_time <= date_hour && b.end_time >= date_hour {
                 return Ok(b.clone());
             }
         }
 
-        Err(SchedulingError(format!("no block in schedule corresponding to hour {}", hour)))
+        Err(SchedulingError(format!("no block in schedule corresponding to hour {}", date_hour)))
     }
+}
+
+/// Adjusts start and end hours according the given offset
+///
+/// # Arguments
+///
+/// * 'blocks' - a vector of Block
+/// * 'offset' - the offset to apply
+fn adjust_for_offset(mut blocks: Vec<Block>, offset: usize) -> Vec<Block> {
+    for b in blocks.iter_mut(){
+        b.start_hour += offset;
+        if b.start_hour > 23 {
+            b.start_hour -= 24;
+            b.start_time = b.start_time.add(TimeDelta::days(1));
+        }
+        b.end_hour += offset;
+        if b.end_hour > 23 {
+            b.end_hour -= 24;
+            b.end_time = b.end_time.add(TimeDelta::days(1));
+        }
+        b.start_time = b.start_time.with_hour(b.start_hour as u32).unwrap();
+        b.end_time = b.end_time.with_hour(b.end_hour as u32).unwrap();
+    }
+
+    blocks
 }
 
 /// Seeks the best schedule given input parameters.
@@ -244,33 +302,32 @@ impl Schedule {
 ///
 /// # Arguments
 ///
-/// * 'start' - start hour for the schedule to be created
 /// * 'tariffs' - tariffs as given from NordPool but marked up with VAT, fees and other price components
 /// * 'net_prod' - the net production (production minus consumption) per hour
 /// * 'charge_in' - any residual charge to bear in to the new schedule
 /// * 'charge_tariff_in' - the mean price for the residual price
 /// * 'date_time' - the date to stamp on the block
-fn seek_best(start: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Blocks {
+fn seek_best(tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Blocks {
     let mut schedule_id: u32 = 0;
     let mut record: HashMap<usize, Blocks> = create_base_blocks(schedule_id, charge_in, charge_tariff_in, &tariffs, net_prod, date_time);
 
-    for seek_first_charge in start..23 {
+    for seek_first_charge in 0..tariffs.length {
         for charge_level_first in 0..=90 {
             schedule_id += 1;
 
-            let first_charge_blocks = seek_charge(start, seek_first_charge, charge_level_first, &tariffs, net_prod, charge_in, charge_tariff_in, date_time);
-            for seek_first_use in first_charge_blocks.next_start..24 {
+            let first_charge_blocks = seek_charge(0, seek_first_charge, charge_level_first, &tariffs, net_prod, charge_in, charge_tariff_in, date_time);
+            for seek_first_use in first_charge_blocks.next_start..tariffs.length {
 
                 if let Some(first_use_blocks) = seek_use(schedule_id, first_charge_blocks.next_start, seek_first_use, &tariffs, net_prod, first_charge_blocks.next_charge_in, first_charge_blocks.next_charge_tariff_in, date_time) {
                     let first_combined = combine_blocks(&first_charge_blocks, &first_use_blocks);
                     record_best(1, &first_combined, &tariffs, net_prod, &mut record, date_time);
 
-                    for seek_second_charge in first_combined.next_start..23 {
+                    for seek_second_charge in first_combined.next_start..tariffs.length {
                         for charge_level_second in 0..=90 {
                             schedule_id += 1;
 
                             let second_charge_blocks = seek_charge(first_combined.next_start, seek_second_charge, charge_level_second, &tariffs, net_prod, first_combined.next_charge_in, first_combined.next_charge_tariff_in, date_time);
-                            for seek_second_use in second_charge_blocks.next_start..24 {
+                            for seek_second_use in second_charge_blocks.next_start..tariffs.length {
 
                                 if let Some(second_use_blocks) = seek_use(schedule_id, second_charge_blocks.next_start, seek_second_use, &tariffs, net_prod, second_charge_blocks.next_charge_in, second_charge_blocks.next_charge_tariff_in, date_time) {
                                     let second_combined = combine_blocks(&second_charge_blocks, &second_use_blocks);
@@ -325,14 +382,15 @@ fn get_best(record: &HashMap<usize, Blocks>) -> Blocks {
 fn create_base_blocks(schedule_id: u32, charge_in: f64, charge_tariff_in: f64, tariffs: &Tariffs, net_prod: [f64;24], date_time: DateTime<Local>) -> HashMap<usize, Blocks> {
     let mut record: HashMap<usize, Blocks> = HashMap::new();
 
-    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Use, 0, 24, tariffs, net_prod, charge_in, charge_tariff_in);
+    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Use, 0, tariffs.length, tariffs, net_prod, charge_in, charge_tariff_in);
 
     let block = Block {
         block_type: BlockType::Use,
-        date: date_time.date_naive(),
+        start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+        end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
         start_hour: 0,
-        end_hour: 23,
-        size: 24,
+        end_hour: tariffs.length - 1,
+        size: tariffs.length,
         tariffs: None,
         charge_tariff_in,
         charge_tariff_out,
@@ -348,7 +406,7 @@ fn create_base_blocks(schedule_id: u32, charge_in: f64, charge_tariff_in: f64, t
 
     record.insert(0,Blocks {
         schedule_id,
-        next_start: 24,
+        next_start: tariffs.length,
         next_charge_in: block.charge_out,
         next_charge_tariff_in: block.charge_tariff_out,
         next_soc_in: block.soc_out,
@@ -380,7 +438,8 @@ fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_ti
         result.blocks.push({
             Block {
                 block_type: BlockType::Hold,
-                date: date_time.date_naive(),
+                start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+                end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
                 start_hour: result.next_start,
                 end_hour: 0,
                 size: 24 - result.next_start,
@@ -460,12 +519,13 @@ fn record_best(level: usize, blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;
 /// * 'date_time' - the date to stamp on the block
 fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: &Tariffs, net_prod: [f64;24], charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) -> Option<Blocks> {
 
-    for u_start in seek_start..24 {
+    for u_start in seek_start..tariffs.length {
         // for the hold phase
         let (hold_charge_out, hold_charge_tariff_out, hold_overflow, hold_overflow_price) = update_for_pv(BlockType::Hold, initial_start, u_start, tariffs, net_prod, charge_in, charge_tariff_in);
         let hold = Block {
             block_type: BlockType::Hold,
-            date: date_time.date_naive(),
+            start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+            end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
             start_hour: initial_start,
             end_hour: 0,
             size: u_start - initial_start,
@@ -485,8 +545,8 @@ fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: 
         let mut charge_tariff_out:f64 = hold_charge_tariff_out;
         let mut overflow:f64 = hold_overflow;
         let mut overflow_price:f64 = hold_overflow_price;
-        for u_end in u_start..=24 {
-            if u_end > 23 || tariffs.buy[u_end] <= charge_tariff_out {
+        for u_end in u_start..=tariffs.length {
+            if u_end > tariffs.length - 1 || tariffs.buy[u_end] <= charge_tariff_out {
                 if u_end != u_start {
                     return Some(get_use_blocks(schedule_id, u_start, u_end, charge_out, charge_tariff_out, overflow, overflow_price, hold, tariffs, net_prod, date_time));
                 }
@@ -523,7 +583,8 @@ fn seek_use(schedule_id: u32, initial_start: usize, seek_start: usize, tariffs: 
 fn get_charge_block(start: usize, size: usize, tariffs: &Tariffs, charge_in: f64, charge_tariff_in: f64, charge_out: f64, charge_tariff_out: f64, price: f64, date_time: DateTime<Local>) -> Block {
     Block {
         block_type: BlockType::Charge,
-        date: date_time.date_naive(),
+        start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+        end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
         start_hour: start,
         end_hour: 0,
         size,
@@ -563,7 +624,8 @@ fn get_use_blocks(schedule_id: u32, u_start: usize, u_end: usize, charge_out: f6
 
     let usage = Block {
         block_type: BlockType::Use,
-        date: date_time.date_naive(),
+        start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+        end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
         start_hour: u_start,
         end_hour: 0,
         size: u_end - u_start,
@@ -608,7 +670,8 @@ fn seek_charge(initial_start: usize, start: usize, soc_level: usize, tariffs: &T
     let (hold_charge_out, hold_charge_tariff_out, overflow, overflow_price) = update_for_pv(BlockType::Hold, initial_start, start, tariffs, net_prod, charge_in, charge_tariff_in);
     let hold = Block {
         block_type: BlockType::Hold,
-        date: date_time.date_naive(),
+        start_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
+        end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
         start_hour: initial_start,
         end_hour: 0,
         size: start - initial_start,
@@ -664,7 +727,7 @@ fn charge_cost_charge_end(start: usize, charge: f64, tariffs: &Tariffs) -> (f64,
     if (rem * 10.0).round() as usize != 0 {
         hourly_charge.push(rem);
     }
-    let end = (start + hourly_charge.len()).min(24);
+    let end = (start + hourly_charge.len()).min(tariffs.length);
     let c_price = tariffs.buy[start..end].iter()
         .enumerate()
         .map(|(i, t)| hourly_charge[i] * t)
@@ -735,14 +798,15 @@ fn correct_overflow(charge: f64) -> (f64, f64) {
 /// # Arguments
 ///
 /// * 'tariffs' - hourly prices from NordPool (excl VAT)
-fn split_tariffs(tariffs: &Vec<f64>) -> Tariffs {
+/// * 'offset' - the offset between first value in the arrays and actual start time
+fn split_tariffs(tariffs: &Vec<f64>, offset: usize) -> Tariffs {
     let mut buy: [f64;24] = [0.0;24];
     let mut sell: [f64;24] = [0.0;24];
-    tariffs.iter().enumerate()
-        .filter(|(i, _)| *i < 24 )
+    tariffs.iter()
+        .enumerate()
         .for_each(|(i, &t)| (buy[i], sell[i]) = add_vat_markup(t));
 
-    Tariffs { buy, sell, }
+    Tariffs { buy, sell, length: tariffs.len(), offset }
 }
 
 /// Adds VAT and other markups such as energy taxes etc.
@@ -785,10 +849,10 @@ fn add_vat_markup(tariff: f64) -> (f64, f64) {
 pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], consumption_diagram: [[f64;24];7], date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
     let production = PVProduction::new(&forecast, LAT, LONG, pv_diagram, date_time);
-    let consumption = Consumption::new(&forecast, consumption_diagram, date_time.weekday().num_days_from_monday());
+    let consumption = Consumption::new(&forecast, consumption_diagram);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
-    let schedule = Schedule::new_with_scheduling(date_time.hour() as usize, &tariffs, &production, &consumption, charge_in, charge_tariff_in, date_time);
-    save_base_data(backup_dir, date_time, forecast, production.get_production(), consumption.get_consumption())?;
+    let schedule = Schedule::new_with_scheduling(&tariffs, production.get_production(), consumption.get_consumption(), charge_in, charge_tariff_in, date_time);
+    save_base_data(backup_dir, date_time, &forecast, production.get_production(), consumption.get_consumption())?;
 
     Ok(schedule)
 }

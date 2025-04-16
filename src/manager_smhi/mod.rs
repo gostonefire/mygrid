@@ -1,10 +1,11 @@
 pub mod errors;
 
+use std::ops::Add;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, Local, Timelike};
+use chrono::{DateTime, DurationRound, Local, TimeDelta};
 use ureq::Agent;
 use crate::manager_smhi::errors::SMHIError;
-use crate::models::smhi_forecast::{FullForecast, TimeValues};
+use crate::models::smhi_forecast::{FullForecast, ForecastValues};
 
 
 /// Struct for managing whether forecasts produced by SMHI
@@ -12,7 +13,7 @@ pub struct SMHI {
     agent: Agent,
     lat: f64,
     long: f64,
-    forecast: [TimeValues;24],
+    forecast: Vec<ForecastValues>,
 }
 
 impl SMHI {
@@ -32,18 +33,9 @@ impl SMHI {
 
         let agent = config.into();
 
-        let forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 24];
+        //let forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 48];
 
-        Self { agent, lat, long, forecast }
-    }
-
-    /// Sets an existing forecast
-    ///
-    /// # Arguments
-    ///
-    /// * 'forecast' - the forecast to set
-    pub fn set_forecast(&mut self, forecast: [TimeValues; 24]) {
-        self.forecast = forecast;
+        Self { agent, lat, long, forecast: Vec::new() }
     }
 
     /// Retrieves a whether forecast from SMHI for the given date.
@@ -58,13 +50,14 @@ impl SMHI {
     /// # Arguments
     ///
     /// * 'date_time' - the date to get a forecast for
-    pub fn new_forecast(&mut self, date_time: DateTime<Local>) -> Result<[TimeValues;24], SMHIError> {
+    pub fn new_forecast(&mut self, date_time: DateTime<Local>) -> Result<Vec<ForecastValues>, SMHIError> {
         let smhi_domain = "https://opendata-download-metfcst.smhi.se";
         let base_url = "/api/category/pmp3g/version/2/geotype/point";
         let url = format!("{}{}/lon/{:0.4}/lat/{:0.4}/data.json",
                           smhi_domain, base_url, self.long, self.lat);
 
         let date = date_time.date_naive();
+        let next_date = date.add(TimeDelta::days(1));
 
         let json = self.agent
             .get(url)
@@ -74,12 +67,13 @@ impl SMHI {
 
         let tmp_forecast: FullForecast = serde_json::from_str(&json)?;
 
-        let mut forecast: Vec<TimeValues> = Vec::with_capacity(24);
+        let mut forecast: Vec<ForecastValues> = Vec::new();
 
         for ts in tmp_forecast.time_series {
-            if ts.valid_time.date_naive() == date {
-                let mut time_values = TimeValues {
-                    valid_time: ts.valid_time.clone(),
+            let forecast_date = ts.valid_time.date_naive();
+            if forecast_date == date || forecast_date == next_date {
+                let mut time_values = ForecastValues {
+                    valid_time: ts.valid_time.duration_trunc(TimeDelta::hours(1)).unwrap(),
                     temp: 0.0,
                     cloud: 0.0,
                 };
@@ -98,11 +92,38 @@ impl SMHI {
         if forecast.len() == 0 {
             Err(SMHIError::SMHI(format!("No forecast found for {}", date_time.date_naive())))
         } else {
-            self.fill_in_gaps(forecast);
-            Ok(self.forecast)
+            self.top_up_forecast(date_time, forecast);
+            Ok(self.forecast.clone())
         }
     }
 
+    /// Makes sure that the forecast to store and use is relevant up to the current hour of
+    /// the day. If not we copy back from the given forecast.
+    ///
+    /// # Arguments
+    ///
+    /// * 'date_time' - date time to produce forecast for
+    /// * 'forecast' - whether forecast to enrich if necessary
+    fn top_up_forecast(&mut self, date_time: DateTime<Local>, forecast: Vec<ForecastValues>) {
+        let mut new_forecast: Vec<ForecastValues> = Vec::new();
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
+        let diff = (forecast[0].valid_time.duration_trunc(TimeDelta::hours(1)).unwrap() - date_hour).num_hours();
+        if diff > 0 {
+            for h in 0..diff {
+                new_forecast.push(ForecastValues {
+                    valid_time: date_hour.add(TimeDelta::hours(h)),
+                    temp: forecast[0].temp,
+                    cloud: forecast[0].cloud,
+                });
+            }
+        }
+
+        forecast.into_iter().for_each(|t| new_forecast.push(t));
+
+        self.forecast = new_forecast;
+    }
+
+    /*
     /// Takes a forecast that may have time slots where SMHI hasn't reported any data for.
     /// That could be that the forecast is for the current day in which only hours to come
     /// have data, or if the forecast is several days in the future in which SMHI only
@@ -117,7 +138,7 @@ impl SMHI {
     ///
     /// * 'forecast' - whether forecast to enrich (if needed)
     fn fill_in_gaps(&mut self, mut forecast: Vec<TimeValues>) {
-        let mut new_forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 24];
+        let mut new_forecast: Vec<TimeValues> = Vec::new();
 
         let mut available = forecast
             .iter()
@@ -153,6 +174,8 @@ impl SMHI {
 
         self.forecast = new_forecast;
     }
+
+     */
 }
 
 /// Translates whether symbols to values between 0 and 5 from SMHI Wsymb2 values

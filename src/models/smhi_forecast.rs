@@ -23,7 +23,7 @@ pub struct FullForecast {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub struct TimeValues {
+pub struct ForecastValues {
     pub valid_time: DateTime<Local>,
     pub temp: f64,
     pub cloud: f64,
