@@ -208,17 +208,18 @@ impl Schedule {
             .filter(|t|t.valid_time >= date_hour && t.valid_time < date_hour.add(TimeDelta::days(1)))
             .map(|t|t.price)
             .collect::<Vec<f64>>();
+        let allowed_length = tariffs_in_scope.len() as i64;
 
         let mut prod: [f64;24] = [0.0; 24];
         production.iter()
+            .filter(|p|p.valid_time >= date_hour && p.valid_time < date_hour.add(TimeDelta::hours(allowed_length)))
             .enumerate()
-            .filter(|(_, p)|p.valid_time >= date_hour && p.valid_time < date_hour.add(TimeDelta::days(1)))
             .for_each(|(i, p)| prod[i] = p.power);
 
         let mut cons: [f64;24] = [0.0; 24];
         consumption.iter()
+            .filter(|c|c.valid_time >= date_hour && c.valid_time < date_hour.add(TimeDelta::hours(allowed_length)))
             .enumerate()
-            .filter(|(_, c)|c.valid_time >= date_hour && c.valid_time < date_hour.add(TimeDelta::days(1)))
             .for_each(|(i, p)| cons[i] = p.power);
 
         let mut net_prod: [f64;24] = [0.0;24];
@@ -226,14 +227,14 @@ impl Schedule {
             .enumerate()
             .for_each(|(i, &p)| net_prod[i] = (p - cons[i]) / 1000.0);
 
-        let tariffs = split_tariffs(&tariffs_in_scope, date_hour.hour() as usize);
+        let split_tariffs = buy_sell_tariffs(&tariffs_in_scope, date_hour.hour() as usize);
 
-        let blocks = seek_best(&tariffs, net_prod, charge_in, charge_tariff_in, date_time);
+        let blocks = seek_best(&split_tariffs, net_prod, charge_in, charge_tariff_in, date_time);
 
         Schedule {
             date: date_time,
             blocks: adjust_for_offset(blocks.blocks, date_hour.hour() as usize),
-            tariffs,
+            tariffs: split_tariffs,
         }
     }
 
@@ -432,9 +433,9 @@ fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_ti
     // Trim blocks with no length
     result.blocks = result.blocks.iter().filter(|b| b.size > 0).cloned().collect::<Vec<Block>>();
 
-    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Hold, result.next_start, 24, tariffs, net_prod, result.next_charge_in, result.next_charge_tariff_in);
+    let (charge_out, charge_tariff_out, overflow, _) = update_for_pv(BlockType::Hold, result.next_start, tariffs.length, tariffs, net_prod, result.next_charge_in, result.next_charge_tariff_in);
 
-    if result.next_start < 24 {
+    if result.next_start < tariffs.length {
         result.blocks.push({
             Block {
                 block_type: BlockType::Hold,
@@ -442,7 +443,7 @@ fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_ti
                 end_time: date_time.duration_trunc(TimeDelta::days(1)).unwrap(),
                 start_hour: result.next_start,
                 end_hour: 0,
-                size: 24 - result.next_start,
+                size: tariffs.length - result.next_start,
                 tariffs: None,
                 charge_tariff_in: result.next_charge_tariff_in,
                 charge_tariff_out,
@@ -456,7 +457,7 @@ fn trim_and_tail(blocks: &Blocks, tariffs: &Tariffs, net_prod: [f64;24], date_ti
                 status: Status::Waiting,
             }
         });
-        result.next_start = 24;
+        result.next_start = tariffs.length;
         result.next_charge_in = charge_out;
         result.next_charge_tariff_in = charge_tariff_out;
         result.next_soc_in = 10 + (charge_out / SOC_KWH).round().min(90.0) as usize;
@@ -799,7 +800,7 @@ fn correct_overflow(charge: f64) -> (f64, f64) {
 ///
 /// * 'tariffs' - hourly prices from NordPool (excl VAT)
 /// * 'offset' - the offset between first value in the arrays and actual start time
-fn split_tariffs(tariffs: &Vec<f64>, offset: usize) -> Tariffs {
+fn buy_sell_tariffs(tariffs: &Vec<f64>, offset: usize) -> Tariffs {
     let mut buy: [f64;24] = [0.0;24];
     let mut sell: [f64;24] = [0.0;24];
     tariffs.iter()
@@ -848,7 +849,7 @@ fn add_vat_markup(tariff: f64) -> (f64, f64) {
 /// * 'backup_dir' - the path to the backup directory
 pub fn create_new_schedule(nordpool: &NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], consumption_diagram: [[f64;24];7], date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<Schedule, SchedulingError> {
     let forecast = retry!(||smhi.new_forecast(date_time))?;
-    let production = PVProduction::new(&forecast, LAT, LONG, pv_diagram, date_time);
+    let production = PVProduction::new(&forecast, LAT, LONG, pv_diagram);
     let consumption = Consumption::new(&forecast, consumption_diagram);
     let tariffs = retry!(||nordpool.get_tariffs(date_time))?;
     let schedule = Schedule::new_with_scheduling(&tariffs, production.get_production(), consumption.get_consumption(), charge_in, charge_tariff_in, date_time);

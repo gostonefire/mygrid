@@ -51,10 +51,9 @@ impl PVProduction {
     /// * 'lat' - latitude for the point where the PV plant is
     /// * 'long' - longitude for the point where the PV plant is
     /// * 'pv_diagram' - a normalized PV power output diagram from sunrise to sunset
-    /// * 'date_time' - the date to calculate for
-    pub fn new(forecast: &Vec<ForecastValues>, lat: f64, long: f64, pv_diagram: [f64;1440], date_time: DateTime<Local>) -> PVProduction {
+    pub fn new(forecast: &Vec<ForecastValues>, lat: f64, long: f64, pv_diagram: [f64;1440]) -> PVProduction {
         let mut pv_prod = PVProduction { production: Vec::new(), lat, long, pv_diagram };
-        pv_prod.calculate_hour_pv_production(forecast, date_time);
+        pv_prod.calculate_hour_pv_production(forecast);
 
         pv_prod
     }
@@ -69,17 +68,16 @@ impl PVProduction {
     /// # Arguments
     ///
     /// * 'forecast' - the cloud forecast
-    /// * 'date_time' - the date time to calculate for
-    fn calculate_hour_pv_production(&mut self, forecast: &Vec<ForecastValues>, date_time: DateTime<Local>) {
+    fn calculate_hour_pv_production(&mut self, forecast: &Vec<ForecastValues>) {
         let mut pv_production: Vec<ProductionValues> = Vec::new();
         let max_south_elev = self.get_max_sun_elevation(SUMMER_SOLSTICE);
         let min_south_elev = self.get_max_sun_elevation(WINTER_SOLSTICE);
-        let (day_south_elev, sunrise, sunset) = self.get_sun_extremes((date_time.month(), date_time.day()));
-
-        let max_day_power = PVProduction::get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
-        let factor = 1439.0 / (sunset - sunrise);
 
         for v in forecast.iter() {
+            let (day_south_elev, sunrise, sunset) = self.get_sun_extremes((v.valid_time.month(), v.valid_time.day()));
+            let max_day_power = PVProduction::get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
+            let factor = 1439.0 / (sunset - sunrise);
+
             let cloud_factor = PVProduction::get_cloud_factor(v.cloud);
             let mut start = (v.valid_time.hour() * 60) as f64;
             let mut end = start + 59.0;
