@@ -122,60 +122,6 @@ impl SMHI {
 
         self.forecast = new_forecast;
     }
-
-    /*
-    /// Takes a forecast that may have time slots where SMHI hasn't reported any data for.
-    /// That could be that the forecast is for the current day in which only hours to come
-    /// have data, or if the forecast is several days in the future in which SMHI only
-    /// reports some few hours of the day.
-    ///
-    /// This function fills in those gaps given data available using a very simple
-    /// interpolate/extrapolate algorithm (i.e. split the half). If however any current forecast
-    /// in the struct contains data for those gaps, such data will be copied to the new forecast
-    /// before calculating data.
-    ///
-    /// # Arguments
-    ///
-    /// * 'forecast' - whether forecast to enrich (if needed)
-    fn fill_in_gaps(&mut self, mut forecast: Vec<TimeValues>) {
-        let mut new_forecast: Vec<TimeValues> = Vec::new();
-
-        let mut available = forecast
-            .iter()
-            .map(|t| t.valid_time.hour() as usize)
-            .collect::<Vec<usize>>();
-
-        let year = forecast[0].valid_time.year();
-        let ordinal = forecast[0].valid_time.ordinal0();
-        for h in self.forecast {
-            if h.valid_time.year() == year && h.valid_time.ordinal0() == ordinal {
-                if !available.contains(&(h.valid_time.hour() as usize)) {
-                    forecast.push(h.clone());
-                    available.push(h.valid_time.hour() as usize);
-                }
-            }
-        }
-
-        available.sort();
-        forecast.sort_by(|a, b| a.valid_time.cmp(&b.valid_time));
-
-        let mut next_to_set: usize = 0;
-        for (i, h) in forecast.iter().enumerate() {
-            let this_hour = h.valid_time.hour() as usize;
-            let mut next_hour = available.get(i + 1).map_or(24, |v| *v);
-            next_hour = this_hour + (next_hour - this_hour) / 2 + 1;
-            for j in next_to_set..next_hour {
-                new_forecast[j].valid_time = h.valid_time.with_hour(j as u32).unwrap();
-                new_forecast[j].temp = h.temp;
-                new_forecast[j].cloud = h.cloud;
-            }
-            next_to_set = next_hour;
-        }
-
-        self.forecast = new_forecast;
-    }
-
-     */
 }
 
 /// Translates whether symbols to values between 0 and 5 from SMHI Wsymb2 values

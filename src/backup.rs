@@ -67,32 +67,6 @@ pub fn save_base_data(
     Ok(())
 }
 
-/*
-/// Loads last saved base data from file
-///
-/// # Arguments
-///
-/// * 'backup_dir' - the directory to save the file to
-/// * 'date_time' - the date the base data must represent
-pub fn load_base_data(backup_dir: &str, date_time: DateTime<Local>) -> Result<Option<BaseData>, BackupError> {
-    let file_path = format!("{}base_data.json", backup_dir);
-
-    let path = Path::new(&file_path);
-    if path.exists() {
-        let json = fs::read_to_string(path)?;
-        let state: BaseData = serde_json::from_str(&json)?;
-
-        if state.date_time.ordinal0() == date_time.ordinal0() {
-            return Ok(Some(state));
-        }
-    }
-
-    Ok(None)
-}
-
- */
-
-
 /// Saves data about the last charge from grid to battery
 ///
 /// # Arguments
@@ -163,7 +137,7 @@ pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result
         let json = fs::read_to_string(path)?;
         let block: Block = serde_json::from_str(&json)?;
 
-        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1))?;
         if block.start_time <= date_hour && block.end_time >= date_hour {
             return Ok(Some(block))
         }

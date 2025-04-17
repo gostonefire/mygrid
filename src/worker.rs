@@ -240,29 +240,6 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
     Ok(Status::Started)
 }
 
-/// Updates a hold block in the inverter
-///
-/// This is similar to setting a hold block, but it doesn't change it status, it
-/// merely reflects that the max minSoC parameter has been updated for some reason
-/// and now has to be considered as a new min soc on grid in the inverter.
-///
-/// # Arguments
-///
-/// * 'fox' - reference to the Fox struct
-/// * 'max_min_soc' - max min soc allowed for the block
-#[allow(dead_code)]
-fn update_hold(fox: &Fox, max_min_soc: u8) -> Result<(), MyGridWorkerError> {
-    print_msg("Updating hold block", "Update", None);
-    if is_manual_debug()? {return Ok(())}
-
-    let soc = retry!(||fox.get_current_soc())?;
-    let min_soc = max_min_soc.min(soc).max(10).min(100);
-
-    let _ = retry!(||fox.set_min_soc_on_grid(min_soc))?;
-
-    Ok(())
-}
-
 /// Sets a use block in the inverter
 ///
 /// The logic for a use block is quite simple:
