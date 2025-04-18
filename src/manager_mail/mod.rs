@@ -2,6 +2,7 @@ pub mod errors;
 
 use std::time::Duration;
 use ureq::Agent;
+use crate::config::MailParameters;
 use crate::manager_mail::errors::MailError;
 use crate::models::sendgrid::{Address, Content, Email, Personalizations};
 
@@ -20,19 +21,19 @@ impl Mail {
     /// * 'api_key' - the api key for sendgrid
     /// * 'from' - sender email address
     /// * 'to' - receiver email address
-    pub fn new(api_key: String, from: String, to: String) -> Result<Self, MailError> {
-        let config = Agent::config_builder()
+    pub fn new(config: &MailParameters) -> Result<Self, MailError> {
+        let agent_config = Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
             .build();
 
-        let agent = config.into();
+        let agent = agent_config.into();
 
         Ok(
             Self {
                 agent,
-                api_key,
-                from: from.parse::<Address>()?,
-                to: to.parse::<Address>()?,
+                api_key: config.api_key.to_string(),
+                from: config.from.parse::<Address>()?,
+                to: config.to.parse::<Address>()?,
             }
         )
     }

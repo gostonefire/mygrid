@@ -7,6 +7,7 @@ use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use ureq::Agent;
 use ureq::http::{HeaderMap, HeaderName, HeaderValue};
+use crate::config::FoxESS;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_device_history_data::{DeviceHistory, DeviceHistoryData, DeviceHistoryResult, RequestDeviceHistoryData};
@@ -28,14 +29,14 @@ impl Fox {
     ///
     /// * 'api_key' - API key for communication with Fox Cloud
     /// * 'sn' - the serial number of the inverter to manage
-    pub fn new(api_key: String, sn: String) -> Self {
-        let config = Agent::config_builder()
+    pub fn new(config: &FoxESS) -> Self {
+        let agent_config = Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
             .build();
 
-        let agent = config.into();
+        let agent = agent_config.into();
 
-        Self { api_key, sn, agent }
+        Self { api_key: config.api_key.to_string(), sn: config.inverter_sn.to_string(), agent }
     }
 
     /// Obtain the battery current soc (state of charge)

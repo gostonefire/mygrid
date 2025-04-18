@@ -1,29 +1,8 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
 use serde::Serialize;
 use crate::{manager_sun};
+use crate::config::{GeoRef, ProductionParameters};
 use crate::models::smhi_forecast::ForecastValues;
-
-/// Max expected mean output from PV in watts during one hour
-const MAX_PV_POWER: f64 = 6000.0;
-
-/// Min expected mean output from PV in watts during one hour (when sunny)
-const MIN_PV_POWER: f64 = 500.0;
-
-/// The factor on how much clouds should impact on the expected (when sunny) PV power output, i.e.
-/// when cloudy power is reduced by up to this factor
-const CLOUD_IMPACT_FACTOR: f64 = 0.75;
-
-/// Date when summer solstice occurs. Used to figure out max south sun elevation
-const SUMMER_SOLSTICE: (u32, u32) = (6, 21);
-
-/// Date when winter solstice occurs. Used to figure out min south sun elevation
-const WINTER_SOLSTICE: (u32, u32) = (12, 21);
-
-/// Sun elevation angle from where sunrise time is calculated
-const SUNRISE_ANGLE: f64 = 0.0;
-
-/// Sun elevation angle from where sunset time is calculated
-const SUNSET_ANGLE: f64 = 0.0;
 
 #[derive(Clone, Serialize)]
 pub struct ProductionValues {
@@ -39,30 +18,50 @@ pub struct PVProduction {
     production: Vec<ProductionValues>,
     lat: f64,
     long: f64,
+    min_pv_power: f64,
+    max_pv_power: f64,
+    cloud_impact_factor: f64,
+    summer_solstice: (u32, u32),
+    winter_solstice: (u32, u32),
+    sunrise_angle: f64,
+    sunset_angle: f64,
     pv_diagram: [f64; 1440],
 }
 
 impl PVProduction {
-    /// Returns a new PVProduction struct with calculated/estimated PV production levels per hour.
+    /// Returns a new PVProduction struct
     ///
     /// # Arguments
     ///
-    /// * 'forecast' - whether forecast including cloud index and temperatures per hour
-    /// * 'lat' - latitude for the point where the PV plant is
-    /// * 'long' - longitude for the point where the PV plant is
-    /// * 'pv_diagram' - a normalized PV power output diagram from sunrise to sunset
-    pub fn new(forecast: &Vec<ForecastValues>, lat: f64, long: f64, pv_diagram: [f64;1440]) -> PVProduction {
-        let mut pv_prod = PVProduction { production: Vec::new(), lat, long, pv_diagram };
-        pv_prod.calculate_hour_pv_production(forecast);
-
-        pv_prod
+    /// * 'config' - ProductionParameters configuration struct
+    /// * 'location' - GeoRef configuration struct
+    pub fn new(config: &ProductionParameters, location: &GeoRef) -> PVProduction {
+        PVProduction { 
+            production: Vec::new(), 
+            lat: location.lat, 
+            long: location.long,
+            min_pv_power: config.min_pv_power,
+            max_pv_power: config.max_pv_power,
+            cloud_impact_factor: config.cloud_impact_factor,
+            summer_solstice: config.summer_solstice,
+            winter_solstice: config.winter_solstice,
+            sunrise_angle: config.sunrise_angle,
+            sunset_angle: config.sunset_angle,
+            pv_diagram: config.diagram.unwrap() 
+        }
     }
 
-    /// Returns the calculated hourly PV production estimates
-    pub fn get_production(&self) -> &Vec<ProductionValues> {
+    /// Calculate and return new hourly PV production estimates
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'forecast' - whether forecast including cloud index and temperatures per hour
+    pub fn new_estimates(&mut self, forecast: &Vec<ForecastValues>) -> &Vec<ProductionValues> {
+        self.calculate_hour_pv_production(forecast);
+        
         &self.production
     }
-
+    
     /// Calculates hourly PV production based on cloud forecast and sun elevations
     ///
     /// # Arguments
@@ -70,15 +69,15 @@ impl PVProduction {
     /// * 'forecast' - the cloud forecast
     fn calculate_hour_pv_production(&mut self, forecast: &Vec<ForecastValues>) {
         let mut pv_production: Vec<ProductionValues> = Vec::new();
-        let max_south_elev = self.get_max_sun_elevation(SUMMER_SOLSTICE);
-        let min_south_elev = self.get_max_sun_elevation(WINTER_SOLSTICE);
+        let max_south_elev = self.get_max_sun_elevation(self.summer_solstice);
+        let min_south_elev = self.get_max_sun_elevation(self.winter_solstice);
 
         for v in forecast.iter() {
             let (day_south_elev, sunrise, sunset) = self.get_sun_extremes((v.valid_time.month(), v.valid_time.day()));
-            let max_day_power = PVProduction::get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
+            let max_day_power = self.get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
             let factor = 1439.0 / (sunset - sunrise);
 
-            let cloud_factor = PVProduction::get_cloud_factor(v.cloud);
+            let cloud_factor = self.get_cloud_factor(v.cloud);
             let mut start = (v.valid_time.hour() * 60) as f64;
             let mut end = start + 59.0;
 
@@ -121,9 +120,9 @@ impl PVProduction {
     /// * 'day_south_elev' - max elevation for the day we are calculating for
     /// * 'min_south_elev' - min sun south elevation of the year (at winter solstice)
     /// * 'max_south_elev' - max sun south elevation of the year (at summer solstice)
-    fn get_max_day_power(day_south_elev: f64, min_south_elev: f64, max_south_elev: f64) -> f64 {
+    fn get_max_day_power(&self, day_south_elev: f64, min_south_elev: f64, max_south_elev: f64) -> f64 {
         let sun_top_factor = (day_south_elev - min_south_elev).max(0.0) / (max_south_elev - min_south_elev);
-        let sun_top_power = (MAX_PV_POWER - MIN_PV_POWER) * sun_top_factor + MIN_PV_POWER;
+        let sun_top_power = (self.max_pv_power - self.min_pv_power) * sun_top_factor + self.min_pv_power;
 
         sun_top_power
     }
@@ -133,8 +132,8 @@ impl PVProduction {
     /// # Arguments
     ///
     /// * 'cloud_index' - the cloud index given from SMHI (0-5)
-    fn get_cloud_factor(cloud_index: f64) -> f64 {
-        (5.0 - cloud_index) / 5.0 * CLOUD_IMPACT_FACTOR + (1.0 - CLOUD_IMPACT_FACTOR)
+    fn get_cloud_factor(&self, cloud_index: f64) -> f64 {
+        (5.0 - cloud_index) / 5.0 * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
     }
 
     /// Calculates max sun elevation for the given month and day in the current year
@@ -180,11 +179,11 @@ impl PVProduction {
                     max_elevation = elevation;
                 }
 
-                if elevation > SUNRISE_ANGLE && azimuth < min_azimuth {
+                if elevation > self.sunrise_angle && azimuth < min_azimuth {
                     min_azimuth = azimuth;
                     sunrise = (date_time.hour() * 60 + date_time.minute()) as f64;
                 }
-                if elevation > SUNSET_ANGLE && azimuth > max_azimuth {
+                if elevation > self.sunset_angle && azimuth > max_azimuth {
                     max_azimuth = azimuth;
                     sunset = (date_time.hour() * 60 + date_time.minute()) as f64;
                 }

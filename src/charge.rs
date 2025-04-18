@@ -6,7 +6,7 @@ use crate::errors::MyGridWorkerError;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper};
 use crate::backup::save_last_charge;
-use crate::scheduling::{Block, Status, SOC_KWH};
+use crate::scheduling::{Block, Schedule, Status};
 
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -78,24 +78,25 @@ fn get_soc_history(fox: &Fox, start_time: Option<DateTime<Local>>) -> Result<(Ve
 /// # Arguments
 ///
 /// * 'soc' - the state of charge as reported from Fox, i.e. including the 10 not usable
-fn soc_to_available_charge(soc: u8) -> f64 {
-    (soc.max(10) - 10) as f64 * SOC_KWH
+/// * 'soc_kwh' - kwh per soc unit
+fn soc_to_available_charge(soc: u8, soc_kwh: f64) -> f64 {
+    (soc.max(10) - 10) as f64 * soc_kwh
 }
 
 /// Updates last charge in case the active block is a charge block, otherwise it just
 /// returns the same last charge as was given in the call
 /// # Arguments
 ///
-/// * 'fox' - reference to the Fox struct
+/// * 'schedule' - reference to the Schedule struct
 /// * 'backup_dir' - the directory to save the new last charge to
 /// * 'active_block' - the block that was or is active
 /// * 'last_charge' - data from the last finished charge from grid
+/// * 'soc' - current SoC to update for
 /// * 'date_time' - date time to stamp as the end of the last charge
-pub fn update_last_charge(fox: &Fox, backup_dir: &str, active_block: &mut Option<Block>, last_charge: Option<LastCharge>, date_time: DateTime<Local>) -> Result<Option<LastCharge>, MyGridWorkerError> {
+pub fn update_last_charge(schedule: &Schedule, backup_dir: &str, active_block: &mut Option<Block>, last_charge: Option<LastCharge>, soc: u8, date_time: DateTime<Local>) -> Result<Option<LastCharge>, MyGridWorkerError> {
     if active_block.as_ref().is_some_and(|b| b.is_charge()) {
-        let (_, soc_current) = get_soc_history(fox, None)?;
         let block = active_block.as_mut().unwrap();
-        block.update_block_status(Status::Full(soc_current as usize));
+        schedule.update_block(block, Status::Full(soc as usize));
         let new_last_charge = Some(get_last_charge(block, date_time));
         save_last_charge(backup_dir, &new_last_charge)?;
 
@@ -131,7 +132,8 @@ pub fn get_last_charge(charge_block: &Block, date_time: DateTime<Local>) -> Last
 /// * 'fox' - reference to the Fox struct
 /// * 'active_block' - the block that was active to be used if last charge isn't provided
 /// * 'last_charge' - data from the last finished charge from grid
-pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge: &Option<LastCharge>) -> Result<(f64, f64), MyGridWorkerError> {
+/// * 'soc_kwh' - kwh per soc unit
+pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge: &Option<LastCharge>, soc_kwh: f64) -> Result<(f64, f64), MyGridWorkerError> {
     match last_charge {
         None => {
             let (charge_tariff_out, soc_current) = match active_block {
@@ -150,13 +152,13 @@ pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge:
                     (0.0, soc_current)
                 }
             };
-            Ok((soc_to_available_charge(soc_current), charge_tariff_out))
+            Ok((soc_to_available_charge(soc_current, soc_kwh), charge_tariff_out))
         },
         Some(last_charge) => {
             let (soc_history, soc_current) = get_soc_history(&fox, Some(last_charge.date_time_end))?;
             let charge_tariff_out = update_stored_charge_cost(&soc_history, last_charge.charge_tariff_out);
 
-            Ok((soc_to_available_charge(soc_current), charge_tariff_out))
+            Ok((soc_to_available_charge(soc_current, soc_kwh), charge_tariff_out))
         }
     }
 }
@@ -168,7 +170,7 @@ pub fn updated_charge_data(fox: &Fox, active_block: &Option<Block>, last_charge:
 ///
 /// * 'soc_history' - the SoC history starting from the end of a battery charge from grid
 /// * 'charge_tariff_in' - the charge tariff per kWh as of the end of a battery charge from grid
-pub fn update_stored_charge_cost(soc_history: &Vec<u8>, charge_tariff_in: f64) -> f64 {
+fn update_stored_charge_cost(soc_history: &Vec<u8>, charge_tariff_in: f64) -> f64 {
     let mut charge_tariff_out: f64 = charge_tariff_in;
     let mut peaks_valleys: Vec<Value> = Vec::new();
 

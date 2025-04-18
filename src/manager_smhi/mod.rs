@@ -4,6 +4,7 @@ use std::ops::Add;
 use std::time::Duration;
 use chrono::{DateTime, DurationRound, Local, TimeDelta};
 use ureq::Agent;
+use crate::config::GeoRef;
 use crate::manager_smhi::errors::SMHIError;
 use crate::models::smhi_forecast::{FullForecast, ForecastValues};
 
@@ -26,16 +27,14 @@ impl SMHI {
     ///
     /// * 'lat' - latitude for the point to get forecasts for
     /// * 'long' - longitude for the point to get forecasts for
-    pub fn new(lat: f64, long: f64) -> SMHI {
-        let config = Agent::config_builder()
+    pub fn new(config: &GeoRef) -> SMHI {
+        let agent_config = Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
             .build();
 
-        let agent = config.into();
+        let agent = agent_config.into();
 
-        //let forecast = [TimeValues { valid_time: Default::default(), temp: 0.0, cloud: 0.0 }; 48];
-
-        Self { agent, lat, long, forecast: Vec::new() }
+        Self { agent, lat: config.lat, long: config.long, forecast: Vec::new() }
     }
 
     /// Retrieves a whether forecast from SMHI for the given date.

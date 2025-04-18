@@ -22,12 +22,7 @@ mod manager_mail;
 mod manual;
 mod scheduling;
 mod charge;
-
-/// Latitude of the power plant
-const LAT: f64 = 56.22332313734338;
-
-/// Longitude of the power plant
-const LONG: f64 = 15.658393416666142;
+mod config;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
@@ -40,18 +35,18 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (fox, nordpool, mut smhi, mail, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) = match init() {
-            Ok((f, n, s, m, pv, c, ab, lc, b, st, mf)) => (f, n, s, m, pv, c, ab, lc, b, st, mf),
+        let (config, mut mgr, last_charge, active_block) = match init() {
+            Ok((c, m, l, a)) => (c, m, l, a),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
                 continue;
             }
         };
 
-        match run(fox, nordpool, &mut smhi, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file) {
+        match run(config, &mut mgr, last_charge, active_block) {
             Ok(()) => return,
             Err(e) => {
-                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mail));
+                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mgr.mail));
             }
         }
     }

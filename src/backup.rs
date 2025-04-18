@@ -5,7 +5,7 @@ use std::ops::Add;
 use std::path::Path;
 use std::thread;
 use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
 use crate::models::smhi_forecast::ForecastValues;
@@ -22,16 +22,6 @@ pub struct BaseData {
     forecast: Vec<ForecastValues>,
     production: Vec<ProductionValues>,
     consumption: Vec<ConsumptionValues>,
-}
-
-#[derive(Deserialize)]
-struct PVDiagram {
-    pv_data: Vec<f64>,
-}
-
-#[derive(Deserialize)]
-pub struct ConsumptionDiagram {
-    pub day: [[f64; 24];7],
 }
 
 /// Saves base data used in the creation of a schedule if time is not in the future
@@ -128,8 +118,7 @@ pub fn save_active_block(backup_dir: &str, block: &Block) -> Result<(), BackupEr
 /// # Arguments
 ///
 /// * 'backup_dir' - the directory to save the file to
-/// * 'date_time' - the date and time that the state must cover to be returned
-pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result<Option<Block>, BackupError> {
+pub fn load_active_block(backup_dir: &str) -> Result<Option<Block>, BackupError> {
     let file_path = format!("{}active_block.json", backup_dir);
 
     let path = Path::new(&file_path);
@@ -137,61 +126,13 @@ pub fn load_active_block(backup_dir: &str, date_time: DateTime<Local>) -> Result
         let json = fs::read_to_string(path)?;
         let block: Block = serde_json::from_str(&json)?;
 
-        let date_hour = date_time.duration_trunc(TimeDelta::hours(1))?;
+        let date_hour = Local::now().duration_trunc(TimeDelta::hours(1))?;
         if block.start_time <= date_hour && block.end_time >= date_hour {
             return Ok(Some(block))
         }
     }
 
     Ok(None)
-}
-
-/// Loads PV Diagram data
-///
-/// # Arguments
-///
-/// * 'config_dir' - the directory where to find config files
-pub fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], BackupError> {
-    let file_path = format!("{}pv_diagram.json", config_dir);
-
-    let path = Path::new(&file_path);
-    if path.exists() {
-        let mut result: [f64;1440] = [0.0;1440];
-
-        let json = fs::read_to_string(path)?;
-        let pv_diagram: PVDiagram = serde_json::from_str(&json)?;
-
-        if pv_diagram.pv_data.len() != 1440 {
-            return Err(BackupError::from("PV diagram length mismatch"))
-        }
-
-        for (i, p) in pv_diagram.pv_data.iter().enumerate() {
-            result[i] = *p;
-        }
-
-        Ok(result)
-    } else {
-        Err(BackupError::from("PV diagram file not found"))
-    }
-}
-
-/// Loads consumption diagram configuration
-///
-/// # Arguments
-///
-/// * 'config_dir' - the directory where to find config files
-pub fn load_consumption_diagram(config_dir: &str) -> Result<[[f64;24];7], BackupError> {
-    let file_path = format!("{}consumption_diagram.json", config_dir);
-
-    let path = Path::new(&file_path);
-    if path.exists() {
-        let json = fs::read_to_string(path)?;
-        let consumption_diagram: ConsumptionDiagram = serde_json::from_str(&json)?;
-
-        Ok(consumption_diagram.day)
-    } else {
-        Err(BackupError::from("consumption diagram file not found"))
-    }
 }
 
 /// Gat and saves statistics from yesterday

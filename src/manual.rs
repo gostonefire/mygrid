@@ -18,6 +18,7 @@ struct ManualDates {
 ///
 /// # Arguments
 ///
+/// * 'manual_file' - the file holding any dates indicating going manual
 /// * 'date' - date to check if to set manual mode
 pub fn check_manual(manual_file: &str, date: DateTime<Local>) -> Result<Option<bool>, SkipError> {
     let was_manual = *MANUAL_DAY.read()?;

@@ -1,12 +1,7 @@
 use chrono::{DateTime, Datelike, Local, Timelike};
 use serde::Serialize;
+use crate::config::ConsumptionParameters;
 use crate::models::smhi_forecast::ForecastValues;
-
-/// Min average consumption/load in watts over an hour
-const MIN_AVG_LOAD: f64 = 200.0;
-
-/// Max average consumption/load in watts over an hour
-const MAX_AVG_LOAD: f64 = 2500.0;
 
 #[derive(Clone, Serialize)]
 pub struct ConsumptionValues {
@@ -20,43 +15,49 @@ pub struct ConsumptionValues {
 /// just an inverse linear proportion between temperature and estimated load.
 pub struct Consumption {
     consumption: Vec<ConsumptionValues>,
+    min_avg_load: f64,
+    max_avg_load: f64,
+    diagram: [[f64;24];7],
 }
+
 impl Consumption {
-    /// Returns a new Consumption struct with calculated/estimated load levels per hour.
+    /// Returns a new Consumption struct
     ///
     /// # Arguments
     ///
-    /// * 'forecast' - whether forecast including temperatures per hour
-    /// * 'consumption_diagram' - daily household consumption not considering house heating
-    /// * 'week_day' - day of week to create estimated consumption for
-    pub fn new(forecast: &Vec<ForecastValues>, consumption_diagram: [[f64;24];7]) -> Consumption {
-        let mut consumption = Consumption { consumption: Vec::new() };
-        consumption.calculate_consumption(forecast, consumption_diagram);
-
-        consumption
+    /// * 'config' - configuration struct
+    pub fn new(config: &ConsumptionParameters) -> Consumption {
+        Consumption { 
+            consumption: Vec::new(),
+            min_avg_load: config.min_avg_load,
+            max_avg_load: config.max_avg_load,
+            diagram: config.diagram.unwrap(),
+        }
     }
-
-    /// Return the hourly calculated consumption estimates
-    pub fn get_consumption(&self) -> &Vec<ConsumptionValues> {
+    
+    /// Calculate and return new hourly consumption estimates
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'forecast' - whether forecast from SMHI
+    pub fn new_estimates(&mut self, forecast: &Vec<ForecastValues>) -> &Vec<ConsumptionValues> {
+        self.calculate_consumption(forecast);
+        
         &self.consumption
     }
 
     /// Calculates hourly household consumption based on temperature forecast
     ///
-    /// The consumption goes down quite drastically with warmer whether so some inverse exponential
-    /// or inverse power of X is probably going to be pretty close
-    ///
     /// # Arguments
     ///
     /// * 'forecast' - the temperature forecast
-    ///  * 'consumption_diagram' - daily household consumption not considering house heating
-    fn calculate_consumption(&mut self, forecast: &Vec<ForecastValues>, consumption_diagram: [[f64;24];7]) {
+    fn calculate_consumption(&mut self, forecast: &Vec<ForecastValues>) {
         let mut hour_load: Vec<ConsumptionValues> = Vec::new();
 
         for v in forecast.iter() {
             let week_day = v.valid_time.weekday().num_days_from_monday() as usize;
             let hour = v.valid_time.hour() as usize;
-            let power = Consumption::consumption_curve(v.temp) + consumption_diagram[week_day][hour];
+            let power = self.consumption_curve(v.temp) + self.diagram[week_day][hour];
             hour_load.push(ConsumptionValues { valid_time: v.valid_time, power });
         }
 
@@ -76,12 +77,12 @@ impl Consumption {
     /// # Arguments
     ///
     /// * 'temp' - outside temperature
-    fn consumption_curve(temp: f64) -> f64 {
+    fn consumption_curve(&self, temp: f64) -> f64 {
         let capped_temp = temp.max(-4.0).min(20.0);
         let factor = 8.0 * 3.0f64.sqrt() - 8.0;
         let curve = 2.0 / (capped_temp + factor) - 2.0 / ( 20.0 + factor);
 
-        curve * (MAX_AVG_LOAD - MIN_AVG_LOAD) + MIN_AVG_LOAD
+        curve * (self.max_avg_load - self.min_avg_load) + self.min_avg_load
     }
 }
 

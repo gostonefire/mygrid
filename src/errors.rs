@@ -28,6 +28,11 @@ impl From<BackupError> for MyGridInitError {
         MyGridInitError(e.to_string())
     }
 }
+impl From<ConfigError> for MyGridInitError {
+    fn from(e: ConfigError) -> Self {
+        MyGridInitError(e.to_string())
+    }
+}
 impl From<MailError> for MyGridInitError {
     fn from(e: MailError) -> Self { MyGridInitError(e.to_string()) }
 }
@@ -129,6 +134,34 @@ impl From<FoxError> for BackupError {
 impl From<&str> for BackupError {
     fn from(e: &str) -> Self {
         BackupError(e.to_string())
+    }
+}
+
+/// Error depicting errors that occur while doing config operations
+///
+pub struct ConfigError(String);
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ConfigError: {}", self.0)
+    }
+}
+impl From<std::io::Error> for ConfigError {
+    fn from(e: std::io::Error) -> Self {
+        ConfigError(e.to_string())
+    }
+}
+impl From<toml::de::Error> for ConfigError {
+    fn from(e: toml::de::Error) -> Self { ConfigError(e.to_string()) }
+}
+impl From<&str> for ConfigError {
+    fn from(e: &str) -> Self {
+        ConfigError(e.to_string())
+    }
+}
+impl From<serde_json::Error> for ConfigError {
+    fn from(e: serde_json::Error) -> Self {
+        ConfigError(e.to_string())
     }
 }
 

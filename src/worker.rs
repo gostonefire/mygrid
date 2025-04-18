@@ -1,20 +1,19 @@
 use std::thread;
 use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
 use crate::manager_fox_cloud::Fox;
-use crate::manager_nordpool::NordPool;
-use crate::manager_smhi::SMHI;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics};
 use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, LastCharge};
-use crate::errors::{MyGridWorkerError};
+use crate::config::Config;
+use crate::errors::MyGridWorkerError;
+use crate::initialization::Mgr;
 use crate::manager_mail::Mail;
-use crate::scheduling::{create_new_schedule, Block, BlockType, Schedule, Status};
+use crate::scheduling::{update_schedule, Block, BlockType, Schedule, Status};
 use crate::manual::check_manual;
 
-pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440], consumption_diagram: [[f64;24];7], mut active_block: Option<Block>, mut last_charge: Option<LastCharge>, backup_dir: String, stats_dir: String, manual_file: String)
+pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, mut active_block: Option<Block>)
            -> Result<(), MyGridWorkerError> {
 
-    let mut schedule: Schedule;
     let mut charge_check_done: DateTime<Local> = DateTime::default();
     let mut local_now: DateTime<Local>;
     let mut day_of_year: Option<u32> = None;
@@ -24,7 +23,7 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
         local_now = Local::now();
 
         // Check if we should go into manual mode for today
-        if let Some(manual_mode) = check_manual(&manual_file, local_now)? {
+        if let Some(manual_mode) = check_manual(&config.files.manual_file, local_now)? {
             if manual_mode {
                 print_msg("Manual mode activated for today", "Update", None);
             } else {
@@ -34,8 +33,8 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
 
         // Check inverter time and save some stats once every day, hour 15 is arbitrary
         if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != local_now.ordinal0())) && local_now.hour() >= 15 {
-            check_inverter_local_time(&fox)?;
-            save_yesterday_statistics(&stats_dir, &fox)?;
+            check_inverter_local_time(&mgr.fox)?;
+            save_yesterday_statistics(&config.files.stats_dir, &mgr.fox)?;
             day_of_year = Some(local_now.ordinal0());
         }
 
@@ -53,12 +52,12 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
 
             if local_now - charge_check_done > Duration::minutes(5) {
                 let mut block = active_block.unwrap();
-                if let Some(status) = set_full_if_done(&fox, block.soc_out)? {
-                    block.update_block_status(status);
+                if let Some(status) = set_full_if_done(&mgr.fox, block.soc_out)? {
+                    mgr.schedule.update_block(&mut block, status);
                     last_charge = Some(get_last_charge(&block, local_now));
 
-                    save_last_charge(&backup_dir, &last_charge)?;
-                    save_active_block(&backup_dir, &block)?;
+                    save_last_charge(&config.files.backup_dir, &last_charge)?;
+                    save_active_block(&config.files.backup_dir, &block)?;
                 }
                 active_block = Some(block);
                 charge_check_done = local_now;
@@ -67,39 +66,39 @@ pub fn run(fox: Fox, nordpool: NordPool, smhi: &mut SMHI, pv_diagram: [f64;1440]
 
         // This is the main mode selector given a new schedule after every finished block
         if is_update_time(&active_block, local_now) {
+            last_charge = update_last_charge(&mgr.schedule, &config.files.backup_dir, &mut active_block, last_charge, get_soc(&mgr.fox)?, local_now)?;
+            let (charge_in, charge_tariff_in) = updated_charge_data(&mgr.fox, &active_block, &last_charge, config.charge.soc_kwh)?;
 
-            last_charge = update_last_charge(&fox, &backup_dir, &mut active_block, last_charge, local_now)?;
-            let (charge_in, charge_tariff_in) = updated_charge_data(&fox, &active_block, &last_charge)?;
-
-            schedule = create_new_schedule(&nordpool, smhi, pv_diagram, consumption_diagram, local_now, charge_in, charge_tariff_in, &backup_dir)?;
-            let mut block = schedule.get_block(local_now)?;
+            update_schedule(mgr, local_now, charge_in, charge_tariff_in, &config.files.backup_dir)?;
+            
+            let mut block = mgr.schedule.get_block(local_now)?;
 
             let status: Status;
             match block.block_type {
                 BlockType::Charge => {
-                    status = set_charge(&fox, &block).map_err(|e| {
+                    status = set_charge(&mgr.fox, &block).map_err(|e| {
                         MyGridWorkerError::new(e.to_string(), &block)
                     })?;
                 },
 
                 BlockType::Hold => {
-                    status = set_hold(&fox, block.soc_in as u8).map_err(|e| {
+                    status = set_hold(&mgr.fox, block.soc_in as u8).map_err(|e| {
                         MyGridWorkerError::new(e.to_string(), &block)
                     })?;
                 },
 
                 BlockType::Use => {
-                    status = set_use(&fox).map_err(|e| {
+                    status = set_use(&mgr.fox).map_err(|e| {
                         MyGridWorkerError::new(e.to_string(), &block)
                     })?;
                 },
             }
-            schedule.update_block_status(local_now.hour() as usize, status.clone());
-            block.update_block_status(status);
-            save_active_block(&backup_dir, &block)?;
+            mgr.schedule.update_block_status(local_now.hour() as usize, status.clone());
+            mgr.schedule.update_block(&mut block, status);
+            save_active_block(&config.files.backup_dir, &block)?;
             active_block = Some(block);
 
-            print_schedule(&schedule,"Update", None);
+            print_schedule(&mgr.schedule,"Update", None);
         }
     }
 }
@@ -261,6 +260,14 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     Ok(Status::Started)
 }
 
+/// Retrieves current soc from inverter
+/// 
+/// # Arguments
+/// 
+/// * 'fox' - reference to the Fox struct
+fn get_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
+    Ok(retry!(||fox.get_current_soc())?)
+}
 
 /// Prints a schedule, i.e. its blocks, with a caption
 ///

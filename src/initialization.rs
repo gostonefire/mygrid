@@ -1,37 +1,34 @@
 use std::env;
 use std::str::FromStr;
-use chrono::Local;
-use crate::{DEBUG_MODE, LAT, LONG};
-use crate::backup::{load_last_charge, load_active_block, load_pv_diagram, load_consumption_diagram};
+use crate::{DEBUG_MODE};
+use crate::backup::{load_last_charge, load_active_block};
 use crate::charge::LastCharge;
+use crate::config::{load_config, Config};
+use crate::consumption::Consumption;
 use crate::errors::{MyGridInitError};
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::scheduling::Block;
+use crate::production::PVProduction;
+use crate::scheduling::{Block, Schedule};
 
-/// Initializes and returns Fox, NordPool, SMHI and Schedule structs and backup dir
+pub struct Mgr {
+    pub fox: Fox,
+    pub nordpool: NordPool,
+    pub smhi: SMHI,
+    pub pv: PVProduction,
+    pub cons: Consumption,
+    pub mail: Mail,
+    pub schedule: Schedule,
+}
+
+/// Initializes and returns configuration, a Mgr struct holding various of initialized structs, 
+/// an optional LastCharge struct, and an optional active block
 ///
-pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], [[f64;24];7], Option<Block>, Option<LastCharge>, String, String, String), MyGridInitError> {
-    let api_key = env::var("FOX_ESS_API_KEY")
-        .expect("Error getting FOX_ESS_API_KEY");
-    let inverter_sn = env::var("FOX_ESS_INVERTER_SN")
-        .expect("Error getting FOX_ESS_INVERTER_SN");
-    let backup_dir = env::var("BACKUP_DIR")
-        .expect("Error getting BACKUP_DIR");
-    let stats_dir = env::var("STATS_DIR")
-        .expect("Error getting STATS_DIR");
+pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGridInitError> {
     let config_dir = env::var("CONFIG_DIR")
         .expect("Error getting CONFIG_DIR");
-    let manual_file = env::var("MANUAL_FILE")
-        .expect("Error getting MANUAL_FILE");
-    let mail_api_key = env::var("MAIL_API_KEY")
-        .expect("Error getting MAIL_PASSWORD");
-    let mail_from = env::var("MAIL_FROM")
-        .expect("Error getting MAIL_FROM");
-    let mail_to = env::var("MAIL_TO")
-        .expect("Error getting MAIL_TO");
 
     let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
     {
@@ -44,18 +41,30 @@ pub fn init() -> Result<(Fox, NordPool, SMHI, Mail, [f64;1440], [[f64;24];7], Op
     // Print version
     println!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
 
+    // Load configuration
+    let config = load_config(&config_dir)?;
+    
     // Instantiate structs
-    let fox = Fox::new(api_key, inverter_sn);
+    let fox = Fox::new(&config.fox_ess);
     let nordpool = NordPool::new();
-    let smhi = SMHI::new(LAT, LONG);
-    let mail = Mail::new(mail_api_key, mail_from, mail_to)?;
+    let smhi = SMHI::new(&config.geo_ref);
+    let pv = PVProduction::new(&config.production, &config.geo_ref);
+    let cons = Consumption::new(&config.consumption);
+    let mail = Mail::new(&config.mail)?;
+    let schedule = Schedule::new(&config.charge);
 
-    let pv_diagram = load_pv_diagram(&config_dir)?;
-    let consumption_diagram = load_consumption_diagram(&config_dir)?;
+    let mgr = Mgr {
+        fox,
+        nordpool,
+        smhi,
+        pv,
+        cons,
+        mail,
+        schedule,
+    };
+ 
+    let last_charge = load_last_charge(&config.files.backup_dir)?;
+    let active_block = load_active_block(&config.files.backup_dir)?;
 
-    let local_now = Local::now();
-    let last_charge = load_last_charge(&backup_dir)?;
-    let active_block = load_active_block(&backup_dir, local_now)?;
-
-    Ok((fox, nordpool, smhi, mail, pv_diagram, consumption_diagram, active_block, last_charge, backup_dir, stats_dir, manual_file))
+    Ok((config, mgr, last_charge, active_block))
 }
