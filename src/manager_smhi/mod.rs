@@ -77,13 +77,19 @@ impl SMHI {
                     cloud: 0.0,
                 };
 
+                let mut lcc_mean: f64 = 0.0;
+                let mut mcc_mean: f64 = 0.0;
+                let mut hcc_mean: f64 = 0.0;
                 for params in ts.parameters {
-                    if params.name.eq("Wsymb2") {
-                        time_values.cloud = translate_wsymb2(params.values[0]);
-                    } else if params.name.eq("t") {
-                        time_values.temp = params.values[0];
+                    match params.name.as_str() {
+                        "lcc_mean" => lcc_mean = params.values[0],
+                        "mcc_mean" => mcc_mean = params.values[0],
+                        "hcc_mean" => hcc_mean = params.values[0],
+                        "t" => time_values.temp = params.values[0],
+                        _ => (),
                     }
                 }
+                time_values.cloud = ((lcc_mean + mcc_mean + hcc_mean) / 3.0).round();
                 forecast.push(time_values);
             }
         }
@@ -123,6 +129,7 @@ impl SMHI {
     }
 }
 
+/*
 /// Translates whether symbols to values between 0 and 5 from SMHI Wsymb2 values
 /// Wsymb2 values are from 1-27 (see https://opendata.smhi.se/metfcst/pmp/parameters#cloud-cover-parameters)
 /// SMHI values 1-6 represent various levels of cloudy, the rest is for instance fog, rain, snow, etc.
@@ -140,3 +147,4 @@ fn translate_wsymb2(value: f64) -> f64 {
         (symbol - 1) as f64
     }
 }
+*/

@@ -131,9 +131,9 @@ impl PVProduction {
     ///
     /// # Arguments
     ///
-    /// * 'cloud_index' - the cloud index given from SMHI (0-5)
+    /// * 'cloud_index' - the cloud index given from SMHI (0-8)
     fn get_cloud_factor(&self, cloud_index: f64) -> f64 {
-        (5.0 - cloud_index) / 5.0 * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
+        (8.0 - cloud_index) / 8.0 * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
     }
 
     /// Calculates max sun elevation for the given month and day in the current year
