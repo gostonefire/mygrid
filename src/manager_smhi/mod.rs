@@ -74,22 +74,20 @@ impl SMHI {
                 let mut time_values = ForecastValues {
                     valid_time: ts.valid_time.duration_trunc(TimeDelta::hours(1)).unwrap(),
                     temp: 0.0,
-                    cloud: 0.0,
+                    lcc_mean: 0.0,
+                    mcc_mean: 0.0,
+                    hcc_mean: 0.0,
                 };
 
-                let mut lcc_mean: f64 = 0.0;
-                let mut mcc_mean: f64 = 0.0;
-                let mut hcc_mean: f64 = 0.0;
                 for params in ts.parameters {
                     match params.name.as_str() {
-                        "lcc_mean" => lcc_mean = params.values[0],
-                        "mcc_mean" => mcc_mean = params.values[0],
-                        "hcc_mean" => hcc_mean = params.values[0],
+                        "lcc_mean" => time_values.lcc_mean = params.values[0],
+                        "mcc_mean" => time_values.mcc_mean = params.values[0],
+                        "hcc_mean" => time_values.hcc_mean = params.values[0],
                         "t" => time_values.temp = params.values[0],
                         _ => (),
                     }
                 }
-                time_values.cloud = ((lcc_mean + mcc_mean + hcc_mean) / 3.0).round();
                 forecast.push(time_values);
             }
         }
@@ -118,7 +116,9 @@ impl SMHI {
                 new_forecast.push(ForecastValues {
                     valid_time: date_hour.add(TimeDelta::hours(h)),
                     temp: forecast[0].temp,
-                    cloud: forecast[0].cloud,
+                    lcc_mean: forecast[0].lcc_mean,
+                    mcc_mean: forecast[0].mcc_mean,
+                    hcc_mean: forecast[0].hcc_mean,
                 });
             }
         }

@@ -21,6 +21,9 @@ pub struct PVProduction {
     min_pv_power: f64,
     max_pv_power: f64,
     cloud_impact_factor: f64,
+    low_clouds_factor: f64,
+    mid_clouds_factor: f64,
+    high_clouds_factor: f64,
     summer_solstice: (u32, u32),
     winter_solstice: (u32, u32),
     sunrise_angle: f64,
@@ -43,6 +46,9 @@ impl PVProduction {
             min_pv_power: config.min_pv_power,
             max_pv_power: config.max_pv_power,
             cloud_impact_factor: config.cloud_impact_factor,
+            low_clouds_factor: config.low_clouds_factor,
+            mid_clouds_factor: config.mid_clouds_factor,
+            high_clouds_factor: config.high_clouds_factor,
             summer_solstice: config.summer_solstice,
             winter_solstice: config.winter_solstice,
             sunrise_angle: config.sunrise_angle,
@@ -77,7 +83,7 @@ impl PVProduction {
             let max_day_power = self.get_max_day_power(day_south_elev, min_south_elev, max_south_elev);
             let factor = 1439.0 / (sunset - sunrise);
 
-            let cloud_factor = self.get_cloud_factor(v.cloud);
+            let cloud_factor = self.get_cloud_factor(v.lcc_mean, v.mcc_mean, v.hcc_mean);
             let mut start = (v.valid_time.hour() * 60) as f64;
             let mut end = start + 59.0;
 
@@ -132,7 +138,14 @@ impl PVProduction {
     /// # Arguments
     ///
     /// * 'cloud_index' - the cloud index given from SMHI (0-8)
-    fn get_cloud_factor(&self, cloud_index: f64) -> f64 {
+    fn get_cloud_factor(&self, lcc_mean: f64, mcc_mean: f64, hcc_mean: f64) -> f64 {
+        let cloud_index: f64 = (
+                lcc_mean * self.low_clouds_factor +
+                mcc_mean * self.mid_clouds_factor +
+                hcc_mean * self.high_clouds_factor
+            )
+            .min(8.0);
+        
         (8.0 - cloud_index) / 8.0 * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
     }
 

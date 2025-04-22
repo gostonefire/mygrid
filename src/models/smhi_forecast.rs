@@ -26,5 +26,7 @@ pub struct FullForecast {
 pub struct ForecastValues {
     pub valid_time: DateTime<Local>,
     pub temp: f64,
-    pub cloud: f64,
+    pub lcc_mean: f64,
+    pub mcc_mean: f64,
+    pub hcc_mean: f64,
 }
