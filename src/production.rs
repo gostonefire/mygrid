@@ -139,14 +139,12 @@ impl PVProduction {
     ///
     /// * 'cloud_index' - the cloud index given from SMHI (0-8)
     fn get_cloud_factor(&self, lcc_mean: f64, mcc_mean: f64, hcc_mean: f64) -> f64 {
-        let cloud_index: f64 = (
-                lcc_mean * self.low_clouds_factor +
-                mcc_mean * self.mid_clouds_factor +
-                hcc_mean * self.high_clouds_factor
-            )
-            .min(8.0);
+        let cloud_factor: f64 = 
+            (1.0 - hcc_mean/8.0 * self.high_clouds_factor) * 
+            (1.0 - mcc_mean/8.0 * self.mid_clouds_factor) * 
+            (1.0 - lcc_mean/8.0 * self.low_clouds_factor);
         
-        (8.0 - cloud_index) / 8.0 * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
+        cloud_factor * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)
     }
 
     /// Calculates max sun elevation for the given month and day in the current year
