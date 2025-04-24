@@ -80,8 +80,19 @@ struct PVDiagram {
 }
 
 #[derive(Deserialize)]
-pub struct ConsumptionDiagram {
-    pub day: [[f64; 24];7],
+struct DaysDiagram {
+    monday: [f64; 24],
+    tuesday: [f64; 24],
+    wednesday: [f64; 24],
+    thursday: [f64; 24],
+    friday: [f64; 24],
+    saturday: [f64; 24],
+    sunday: [f64; 24],
+}
+
+#[derive(Deserialize)]
+struct HouseHoldConsumption {
+    consumption_diagram: DaysDiagram
 }
 
 /// Loads the configuration file and returns a struct with all configuration items
@@ -139,15 +150,19 @@ fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], ConfigError> {
 ///
 /// * 'config_dir' - the directory where to find config files
 fn load_consumption_diagram(config_dir: &str) -> Result<[[f64;24];7], ConfigError> {
-    let file_path = format!("{}consumption_diagram.json", config_dir);
+    let file_path = format!("{}consumption_diagram.toml", config_dir);
 
-    let path = Path::new(&file_path);
-    if path.exists() {
-        let json = fs::read_to_string(path)?;
-        let consumption_diagram: ConsumptionDiagram = serde_json::from_str(&json)?;
+    let toml = fs::read_to_string(file_path)?;
+    let hhc: HouseHoldConsumption = toml::from_str(&toml)?;
+    
+    let days: [[f64;24];7] = [
+        hhc.consumption_diagram.monday,
+        hhc.consumption_diagram.tuesday,
+        hhc.consumption_diagram.wednesday,
+        hhc.consumption_diagram.thursday,
+        hhc.consumption_diagram.friday,
+        hhc.consumption_diagram.saturday,
+        hhc.consumption_diagram.sunday];
 
-        Ok(consumption_diagram.day)
-    } else {
-        Err(ConfigError::from("consumption diagram file not found"))
-    }
+        Ok(days)
 }
