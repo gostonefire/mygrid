@@ -133,7 +133,7 @@ fn is_update_time(active_block: &Option<Block>, date_time: DateTime<Local>) -> b
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-pub fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
+fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
     let dt = retry!(||fox.get_device_time())?;
     let now = Local::now().naive_local();
     let delta = (now - dt).abs();
@@ -276,7 +276,7 @@ fn get_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
 /// * 'schedule' - the schedule to print
 /// * 'caption' - the caption to print
 /// * 'mail' - mail sender struct
-pub fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
+fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
     let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let caption = format!("{} {} ", report_time, caption);
 
