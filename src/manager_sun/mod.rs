@@ -8,7 +8,7 @@ use trig::Trig;
 /// # Arguments
 ///
 /// * 'date' - the local date time
-pub fn get_declination(date: DateTime<Local>) -> f64 {
+fn get_declination(date: DateTime<Local>) -> f64 {
     let day = date.ordinal0() as f64;
 
     let earth_tilt = -23.44;
@@ -29,8 +29,9 @@ pub fn get_declination(date: DateTime<Local>) -> f64 {
 /// * 'date' - the local date time
 /// * 'lat' - the latitude given in decimal format
 /// * 'long' - the longitude given in decimal format
-/// * 'declination' - the current sun declination
-pub fn get_elevation_and_azimuth(date: DateTime<Local>, lat: f64, long: f64, declination: f64) -> (f64, f64) {
+pub fn get_elevation_and_azimuth(date: DateTime<Local>, lat: f64, long: f64) -> (f64, f64) {
+    let declination = get_declination(date);
+    
     let lstm = 15.0 * (date.offset().local_minus_utc() / 3600) as f64;
     let b = 360.0 / 365.0 * (date.ordinal0() as f64 - 81.0);
     let eot = 9.87 * (2.0 * b).sind() - 7.53 * b.cosd() - 1.5 * b.sind();

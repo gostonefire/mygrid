@@ -160,8 +160,7 @@ impl PVProduction {
         let solstice_day = NaiveDate::from_ymd_opt(Local::now().year(), month_day.0, month_day.1).unwrap();
         for hour in 0..=23 {
             let date_time = Local.from_local_datetime(&solstice_day.and_hms_opt(hour, 0, 0).unwrap()).unwrap();
-            let declination = manager_sun::get_declination(date_time);
-            let (elevation, _) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long, declination);
+            let (elevation, _) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
             if elevation > max_elevation {
                 max_elevation = elevation;
             }
@@ -186,8 +185,7 @@ impl PVProduction {
         for hour in 0..=23 {
             for minute in 0..=59 {
                 let date_time = Local.from_local_datetime(&solstice_day.and_hms_opt(hour, minute, 0).unwrap()).unwrap();
-                let declination = manager_sun::get_declination(date_time);
-                let (elevation, azimuth) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long, declination);
+                let (elevation, azimuth) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
                 if elevation > max_elevation {
                     max_elevation = elevation;
                 }
