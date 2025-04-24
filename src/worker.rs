@@ -93,7 +93,7 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
                     })?;
                 },
             }
-            mgr.schedule.update_block_status(local_now.hour() as usize, status.clone());
+            mgr.schedule.update_block_status(local_now, status.clone());
             mgr.schedule.update_block(&mut block, status);
             save_active_block(&config.files.backup_dir, &block)?;
             active_block = Some(block);

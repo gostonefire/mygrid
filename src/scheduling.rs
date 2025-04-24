@@ -235,11 +235,12 @@ impl Schedule {
     ///
     /// # Arguments
     ///
-    /// * 'hour' - hour to identify block with
+    /// * 'date_time' - the time to find the block to update for
     /// * 'status' - the status to update with
-    pub fn update_block_status(&mut self, hour: usize, status: Status) {
+    pub fn update_block_status(&mut self, date_time: DateTime<Local>, status: Status) {
+        let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
         for b in self.blocks.iter_mut() {
-            if b.status == Status::Waiting && b.start_hour <= hour && b.end_hour >= hour {
+            if b.start_time <= date_hour && b.end_time >= date_hour {
                 b.status = status;
                 return;
             }
