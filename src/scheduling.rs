@@ -837,7 +837,7 @@ pub fn update_schedule(mgr: &mut Mgr, date_time: DateTime<Local>, charge_in: f64
     let consumption = mgr.cons.new_estimates(&forecast);
     let tariffs = retry!(||mgr.nordpool.get_tariffs(date_time))?;
     mgr.schedule.update_scheduling(&tariffs, production, consumption, charge_in, charge_tariff_in, date_time);
-    save_base_data(backup_dir, date_time, &forecast, production, consumption)?;
+    save_base_data(backup_dir, date_time, &forecast, production, consumption, tariffs)?;
 
     Ok(())
 }

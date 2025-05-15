@@ -12,6 +12,7 @@ use crate::models::smhi_forecast::ForecastValues;
 use crate::{retry, wrapper};
 use crate::charge::LastCharge;
 use crate::consumption::ConsumptionValues;
+use crate::models::nordpool_tariffs::TariffValues;
 use crate::production::ProductionValues;
 use crate::scheduling::{Block, Schedule};
 
@@ -22,6 +23,7 @@ pub struct BaseData {
     forecast: Vec<ForecastValues>,
     production: Vec<ProductionValues>,
     consumption: Vec<ConsumptionValues>,
+    tariffs: Vec<TariffValues>,
 }
 
 /// Saves base data used in the creation of a schedule if time is not in the future
@@ -33,12 +35,14 @@ pub struct BaseData {
 /// * 'forecast' - the smhi forecast to save
 /// * 'production' - the production estimates to save
 /// * 'consumption' - the consumption estimates to save
+/// * 'tariffs' - tariffs from NordPool with VAT and markup
 pub fn save_base_data(
     backup_dir: &str,
     date_time: DateTime<Local>,
     forecast: &Vec<ForecastValues>,
     production: &Vec<ProductionValues>,
-    consumption: &Vec<ConsumptionValues>) -> Result<(), BackupError> {
+    consumption: &Vec<ConsumptionValues>,
+    tariffs: Vec<TariffValues>) -> Result<(), BackupError> {
 
     if Local::now().timestamp() >= date_time.timestamp() {
         let file_path = format!("{}base_data.json", backup_dir);
@@ -48,6 +52,7 @@ pub fn save_base_data(
             forecast: forecast.clone(),
             production: production.clone(),
             consumption: consumption.clone(),
+            tariffs,
         };
 
         let json = serde_json::to_string_pretty(&backup)?;
