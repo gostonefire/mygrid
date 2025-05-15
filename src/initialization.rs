@@ -47,7 +47,7 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
     let nordpool = NordPool::new();
-    let smhi = SMHI::new(&config.geo_ref);
+    let smhi = SMHI::new(&config);
     let pv = PVProduction::new(&config.production, &config.geo_ref);
     let cons = Consumption::new(&config.consumption);
     let mail = Mail::new(&config.mail)?;

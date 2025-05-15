@@ -4,7 +4,7 @@ use std::ops::Add;
 use std::time::Duration;
 use chrono::{DateTime, DurationRound, Local, TimeDelta};
 use ureq::Agent;
-use crate::config::GeoRef;
+use crate::config::Config;
 use crate::manager_smhi::errors::SMHIError;
 use crate::models::smhi_forecast::{FullForecast, ForecastValues};
 
@@ -15,6 +15,9 @@ pub struct SMHI {
     lat: f64,
     long: f64,
     forecast: Vec<ForecastValues>,
+    high_clouds_factor: f64,
+    mid_clouds_factor: f64,
+    low_clouds_factor: f64,
 }
 
 impl SMHI {
@@ -27,14 +30,21 @@ impl SMHI {
     ///
     /// * 'lat' - latitude for the point to get forecasts for
     /// * 'long' - longitude for the point to get forecasts for
-    pub fn new(config: &GeoRef) -> SMHI {
+    pub fn new(config: &Config) -> SMHI {
         let agent_config = Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
             .build();
 
         let agent = agent_config.into();
 
-        Self { agent, lat: config.lat, long: config.long, forecast: Vec::new() }
+        Self { 
+            agent, 
+            lat: config.geo_ref.lat, 
+            long: config.geo_ref.long, 
+            forecast: Vec::new(), 
+            high_clouds_factor: config.production.high_clouds_factor, 
+            mid_clouds_factor: config.production.mid_clouds_factor, 
+            low_clouds_factor: config.production.low_clouds_factor, }
     }
 
     /// Retrieves a whether forecast from SMHI for the given date.
@@ -77,6 +87,7 @@ impl SMHI {
                     lcc_mean: 0.0,
                     mcc_mean: 0.0,
                     hcc_mean: 0.0,
+                    cloud_factor: 0.0,
                 };
 
                 for params in ts.parameters {
@@ -92,6 +103,13 @@ impl SMHI {
             }
         }
 
+        forecast.iter_mut().for_each(|f| {
+            f.cloud_factor =
+                (1.0 - f.hcc_mean/8.0 * self.high_clouds_factor) * 
+                (1.0 - f.mcc_mean/8.0 * self.mid_clouds_factor) *
+                (1.0 - f.lcc_mean/8.0 * self.low_clouds_factor);    
+        });
+        
         if forecast.len() == 0 {
             Err(SMHIError::SMHI(format!("No forecast found for {}", date_time.date_naive())))
         } else {
@@ -119,6 +137,7 @@ impl SMHI {
                     lcc_mean: forecast[0].lcc_mean,
                     mcc_mean: forecast[0].mcc_mean,
                     hcc_mean: forecast[0].hcc_mean,
+                    cloud_factor: forecast[0].cloud_factor,
                 });
             }
         }

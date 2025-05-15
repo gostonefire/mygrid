@@ -29,4 +29,5 @@ pub struct ForecastValues {
     pub lcc_mean: f64,
     pub mcc_mean: f64,
     pub hcc_mean: f64,
+    pub cloud_factor: f64,
 }
