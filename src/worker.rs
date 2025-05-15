@@ -2,7 +2,7 @@ use std::thread;
 use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
-use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics};
+use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics, save_schedule};
 use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, LastCharge};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
@@ -96,6 +96,7 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
             mgr.schedule.update_block_status(local_now, status.clone());
             mgr.schedule.update_block(&mut block, status);
             save_active_block(&config.files.backup_dir, &block)?;
+            save_schedule(&config.files.backup_dir, &mgr.schedule)?;
             active_block = Some(block);
 
             print_schedule(&mgr.schedule,"Update", None);

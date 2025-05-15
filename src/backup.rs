@@ -13,7 +13,7 @@ use crate::{retry, wrapper};
 use crate::charge::LastCharge;
 use crate::consumption::ConsumptionValues;
 use crate::production::ProductionValues;
-use crate::scheduling::{Block};
+use crate::scheduling::{Block, Schedule};
 
 
 #[derive(Serialize)]
@@ -165,5 +165,21 @@ pub fn save_yesterday_statistics(stats_dir: &str, fox: &Fox) -> Result<(), Backu
         write!(f, "{},{},{}\n", l.0, l.1, l.2)?
     }
 
+    Ok(())
+}
+
+/// Saves scheduled blocks to file
+/// 
+/// # Arguments
+/// 
+/// * 'backup_dir' - the directory to save the file to
+/// * 'schedule' - schedule containing blocks to save
+pub fn save_schedule(backup_dir: &str, schedule: &Schedule) -> Result<(), BackupError> {
+    let file_path = format!("{}schedule.json", backup_dir);
+    
+    let json = serde_json::to_string_pretty(&schedule.blocks)?;
+    
+    fs::write(file_path, json)?;
+    
     Ok(())
 }
