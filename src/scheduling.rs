@@ -726,23 +726,24 @@ impl Schedule {
     ///
     /// The function spits out one buy price and one sell price
     /// Buy:
-    /// * - Net fee: 31.6 öre (inc VAT)
-    /// * - Spot fee: 7.7% (inc VAT)
+    /// * - Net fee: 31.625 öre (inc VAT)
+    /// * - Spot fee: 7.7% (excl VAT)
     /// * - Energy taxes: 54.875 öre (inc VAT)
     /// * - Spot price (excl VAT)
+    /// * - Variable fees: 7.696 (excl VAT)
     /// * - Extra: 2.4 öre (excl VAT)
     ///
     /// Sell:
-    /// * - Extra: 9.4 öre (inc VAT)
-    /// * - Tax reduction: 60 öre (inc VAT), is returned yearly together with tax regulation
-    /// * - Spot price (excl VAT)
+    /// * - Extra: 7.5 öre (no VAT)
+    /// * - Tax reduction: 60 öre (no VAT), is returned yearly together with tax regulation
+    /// * - Spot price (no VAT)
     ///
     /// # Arguments
     ///
     /// * 'tariff' - spot fee as from NordPool
     fn add_vat_markup(&self, tariff: f64) -> (f64, f64) {
-        let buy = 0.316 + 0.077 * tariff + 0.54875 + (tariff + 0.024) / 0.8;
-        let sell = 0.094 + 0.6 + tariff / 0.8;
+        let buy = 0.31625 + (0.077 * tariff) / 0.8 + 0.54875 + (tariff + 0.024 + 7.696) / 0.8;
+        let sell = 0.075 + 0.6 + tariff;
 
         (buy, sell * self.sell_priority)
     }
