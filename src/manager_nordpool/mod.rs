@@ -86,13 +86,51 @@ impl NordPool {
         let mut result: Vec<TariffValues> = Vec::new();
         tariffs.multi_area_entries.iter().for_each(
             |t| {
-                let sek_per_kwh = (t.entry_per_area.se4 / 10f64).round() / 100f64;
-                result.push(TariffValues{
-                    valid_time: t.delivery_start.duration_trunc(TimeDelta::hours(1)).unwrap(),
-                    price: sek_per_kwh
-                });
+                result.push(add_vat_markup(t.entry_per_area.se4, t.delivery_start));
             });
 
         Ok(result)
     }
+}
+
+/// Adds VAT and other markups such as energy taxes etc.
+///
+/// The function spits out one buy price and one sell price
+/// Buy:
+/// * - Net fee: 31.625 öre (inc VAT)
+/// * - Spot fee: 7.7% (excl VAT)
+/// * - Energy taxes: 54.875 öre (inc VAT)
+/// * - Spot price (excl VAT)
+/// * - Variable fees: 7.696 (excl VAT)
+/// * - Extra: 2.4 öre (excl VAT)
+///
+/// Sell:
+/// * - Extra: 7.5 öre (no VAT)
+/// * - Tax reduction: 60 öre (no VAT), is returned yearly together with tax regulation
+/// * - Spot price (no VAT)
+///
+/// # Arguments
+///
+/// * 'tariff' - spot fee as from NordPool in SEK/MWh
+/// * 'delivery_start' - start time for the spot
+fn add_vat_markup(tariff: f64, delivery_start: DateTime<Local>) -> TariffValues {
+    let price = tariff / 1000.0; // SEK per MWh to per kWh
+    let buy = 0.31625 + (0.077 * price) / 0.8 + 0.54875 + (price + 0.024 + 7.696) / 0.8;
+    let sell = 0.075 + 0.6 + price;
+
+    TariffValues {
+        valid_time: delivery_start.duration_trunc(TimeDelta::hours(1)).unwrap(),
+        price: round_to_two_decimals(price),
+        buy: round_to_two_decimals(buy),
+        sell: round_to_two_decimals(sell),
+    }
+}
+
+/// Rounds values to two decimals
+/// 
+/// # Arguments
+/// 
+/// * 'price' - the price to round to two decimals
+fn round_to_two_decimals(price: f64) -> f64 {
+    (price * 100f64).round() / 100f64
 }

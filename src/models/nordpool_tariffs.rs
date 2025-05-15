@@ -26,4 +26,6 @@ pub struct Tariffs {
 pub struct TariffValues {
     pub valid_time: DateTime<Local>,
     pub price: f64,
+    pub buy: f64,
+    pub sell: f64,
 }
