@@ -202,10 +202,10 @@ impl Schedule {
     /// * 'date_time' - the date time to stamp on the schedule
     pub fn update_scheduling(&mut self, tariffs: &Vec<TariffValues>, production: &Vec<ProductionValues>, consumption: &Vec<ConsumptionValues>, charge_in: f64, charge_tariff_in: f64, date_time: DateTime<Local>) {
         let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
-        let tariffs_in_scope: Vec<f64> = tariffs.iter()
+        let tariffs_in_scope: Vec<(f64,f64)> = tariffs.iter()
             .filter(|t|t.valid_time >= date_hour && t.valid_time < date_hour.add(TimeDelta::days(1)))
-            .map(|t|t.price)
-            .collect::<Vec<f64>>();
+            .map(|t|(t.buy, t.sell))
+            .collect::<Vec<(f64,f64)>>();
         let allowed_length = tariffs_in_scope.len() as i64;
 
         let mut prod: [f64;24] = [0.0; 24];
@@ -226,7 +226,7 @@ impl Schedule {
             .for_each(|(i, &p)| net_prod[i] = (p - cons[i]) / 1000.0);
 
         self.date_time = date_time;
-        self.tariffs = self.buy_sell_tariffs(&tariffs_in_scope, date_hour.hour() as usize);
+        self.tariffs = self.transform_tariffs(&tariffs_in_scope, date_hour.hour() as usize);
         let blocks = self.seek_best(net_prod, charge_in, charge_tariff_in);
         self.blocks = adjust_for_offset(blocks.blocks, date_hour.hour() as usize);
     }
@@ -706,46 +706,23 @@ impl Schedule {
         (charge.min(self.bat_kwh), (charge - self.bat_kwh).max(0.0))
     }
 
-    /// Splits tariffs into twp separate vectors,one for buying and one for selling electricity
+    /// Prepares tariffs for offset management and factors in sell priority
     ///
     /// # Arguments
     ///
     /// * 'tariffs' - hourly prices from NordPool (excl VAT)
     /// * 'offset' - the offset between first value in the arrays and actual start time
-    fn buy_sell_tariffs(&self, tariffs: &Vec<f64>, offset: usize) -> Tariffs {
+    fn transform_tariffs(&self, tariffs: &Vec<(f64, f64)>, offset: usize) -> Tariffs {
         let mut buy: [f64;24] = [0.0;24];
         let mut sell: [f64;24] = [0.0;24];
         tariffs.iter()
             .enumerate()
-            .for_each(|(i, &t)| (buy[i], sell[i]) = self.add_vat_markup(t));
+            .for_each(|(i, &t)| {
+                buy[i] = t.0;
+                sell[i] = t.1 * self.sell_priority;
+            });
 
         Tariffs { buy, sell, length: tariffs.len(), offset }
-    }
-
-    /// Adds VAT and other markups such as energy taxes etc.
-    ///
-    /// The function spits out one buy price and one sell price
-    /// Buy:
-    /// * - Net fee: 31.625 öre (inc VAT)
-    /// * - Spot fee: 7.7% (excl VAT)
-    /// * - Energy taxes: 54.875 öre (inc VAT)
-    /// * - Spot price (excl VAT)
-    /// * - Variable fees: 7.696 (excl VAT)
-    /// * - Extra: 2.4 öre (excl VAT)
-    ///
-    /// Sell:
-    /// * - Extra: 7.5 öre (no VAT)
-    /// * - Tax reduction: 60 öre (no VAT), is returned yearly together with tax regulation
-    /// * - Spot price (no VAT)
-    ///
-    /// # Arguments
-    ///
-    /// * 'tariff' - spot fee as from NordPool
-    fn add_vat_markup(&self, tariff: f64) -> (f64, f64) {
-        let buy = 0.31625 + (0.077 * tariff) / 0.8 + 0.54875 + (tariff + 0.024 + 7.696) / 0.8;
-        let sell = 0.075 + 0.6 + tariff;
-
-        (buy, sell * self.sell_priority)
     }
 
     /// Updates the given block with a new status
