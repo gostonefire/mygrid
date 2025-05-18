@@ -92,11 +92,14 @@ impl PVProduction {
                     end = sunset;
                 }
 
-                //let factor = 1439.0 / (max_azimuth - min_azimuth);
                 let start_idx = ((start - sunrise) * factor).round().max(0.0) as usize;
                 let end_idx = ((end - sunrise) * factor).round().min(1439.0) as usize;
-                let sum = self.pv_diagram[start_idx..end_idx].iter().map(|p| p * max_day_power).sum::<f64>();
-                let power = sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor;
+                let power = if start_idx != end_idx {
+                    let sum = self.pv_diagram[start_idx..end_idx].iter().map(|p| p * max_day_power).sum::<f64>();
+                    sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor
+                } else {
+                    0.0f64
+                };
 
                 pv_production.push(ProductionValues{
                     valid_time: v.valid_time,
