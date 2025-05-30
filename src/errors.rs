@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
 use chrono::{Local, RoundingError};
+use chrono::format::ParseError;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
 use crate::manager_nordpool::errors::NordPoolError;
@@ -126,6 +127,9 @@ impl From<RoundingError> for BackupError {
         BackupError(e.to_string())
     }
 }
+impl From<ParseError> for BackupError {
+    fn from(e: ParseError) -> Self { BackupError(e.to_string()) }
+}
 impl From<FoxError> for BackupError {
     fn from(e: FoxError) -> Self {
         BackupError(e.to_string())
@@ -135,6 +139,9 @@ impl From<&str> for BackupError {
     fn from(e: &str) -> Self {
         BackupError(e.to_string())
     }
+}
+impl From<glob::PatternError> for BackupError {
+    fn from(e: glob::PatternError) -> Self { BackupError(e.to_string()) }
 }
 
 /// Error depicting errors that occur while doing config operations

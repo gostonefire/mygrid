@@ -4,7 +4,8 @@ use std::io::Write;
 use std::ops::Add;
 use std::path::Path;
 use std::thread;
-use chrono::{DateTime, DurationRound, Local, TimeDelta, Utc};
+use chrono::{DateTime, Duration, DurationRound, Local, NaiveDateTime, TimeDelta, Utc};
+use glob::glob;
 use serde::Serialize;
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
@@ -45,7 +46,7 @@ pub fn save_base_data(
     tariffs: Vec<TariffValues>) -> Result<(), BackupError> {
 
     if Local::now().timestamp() >= date_time.timestamp() {
-        let file_path = format!("{}base_data.json", backup_dir);
+        let file_path = format!("{}{}_base_data.json", backup_dir, Utc::now().format("%Y%m%d%H%M%S"));
 
         let backup = BaseData {
             date_time,
@@ -57,6 +58,21 @@ pub fn save_base_data(
 
         let json = serde_json::to_string_pretty(&backup)?;
         fs::write(file_path, json)?;
+    }
+
+    // Remove base data files older than 48 hours
+    let pattern = format!("{}*_base_data.json", backup_dir);
+    for entry in glob(&pattern)? {
+        if let Ok(path) = entry {
+            if let Some(os_name) = path.file_name() {
+                if let Some(filename) = os_name.to_str() {
+                    let datetime: DateTime<Utc> = NaiveDateTime::parse_from_str(&filename[0..14], "%Y%m%d%H%M%S")?.and_utc();
+                    if Utc::now() - datetime > Duration::hours(48) {
+                        fs::remove_file(path)?;
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
