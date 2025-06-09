@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone, Timelike};
 use serde::Serialize;
 use crate::{manager_sun};
 use crate::config::{GeoRef, ProductionParameters};
@@ -25,6 +25,7 @@ pub struct PVProduction {
     winter_solstice: (u32, u32),
     sunrise_angle: f64,
     sunset_angle: f64,
+    visibility_azimuth: f64,
     pv_diagram: [f64; 1440],
 }
 
@@ -47,6 +48,7 @@ impl PVProduction {
             winter_solstice: config.winter_solstice,
             sunrise_angle: config.sunrise_angle,
             sunset_angle: config.sunset_angle,
+            visibility_azimuth: config.visibility_azimuth,
             pv_diagram: config.diagram.unwrap() 
         }
     }
@@ -95,7 +97,9 @@ impl PVProduction {
                 let start_idx = ((start - sunrise) * factor).round().max(0.0) as usize;
                 let end_idx = ((end - sunrise) * factor).round().min(1439.0) as usize;
                 let power = if start_idx != end_idx {
-                    let sum = self.pv_diagram[start_idx..end_idx].iter().map(|p| p * max_day_power).sum::<f64>();
+                    let sum = self.pv_diagram[start_idx..end_idx].iter().enumerate().map(|(i, p)| {
+                        p * max_day_power * self.visibility(start_idx + i, factor, sunrise, v.valid_time)
+                    }).sum::<f64>();
                     sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor
                 } else {
                     0.0f64
@@ -116,6 +120,33 @@ impl PVProduction {
         self.production = pv_production;
     }
 
+    /// Returns visibility factor when sun is behind neighbour houses and also considers
+    /// an approximately 10 minutes for sun to go from obscured to visible
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'idx' - the current index in the pv_diagram
+    /// * 'factor' - factor between diagram and full day
+    /// * 'sunrise' - sunrise in minutes since midnight
+    /// * 'date' - date to calculate for (only date part is used from the DateTime object)
+    fn visibility(&self, idx: usize, factor: f64, sunrise: f64, date: DateTime<Local>) -> f64 {
+        let vis_start = self.visibility_azimuth;
+        let vis_done = self.visibility_azimuth + 2.0;
+        
+        let minute_of_day = (idx as f64 / factor + sunrise).round() as u32;
+        let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(minute_of_day * 60, 0).unwrap()).unwrap();
+        let (_, azi) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
+        if azi < vis_start {
+            // when obscured by surroundings
+            0.1
+        } else if azi >= vis_start && azi <= vis_done {
+            // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
+            1.0 - (vis_done - azi) * 0.45 
+        } else {
+            1.0
+        }
+    }
+    
     /// Calculates the top sun power production given the sun top elevation for the day
     ///
     /// # Arguments

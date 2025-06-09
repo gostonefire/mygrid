@@ -29,6 +29,7 @@ pub struct ProductionParameters {
     pub winter_solstice: (u32, u32),
     pub sunrise_angle: f64,
     pub sunset_angle: f64,
+    pub visibility_azimuth: f64,
     #[serde(skip)]
     pub diagram: Option<[f64;1440]>,
 }
