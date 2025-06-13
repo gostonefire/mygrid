@@ -23,6 +23,7 @@ pub struct BaseData {
     date_time: DateTime<Local>,
     forecast: Vec<ForecastValues>,
     production: Vec<ProductionValues>,
+    production_kw: Vec<ProductionValues>,
     consumption: Vec<ConsumptionValues>,
     tariffs: Vec<TariffValues>,
 }
@@ -42,6 +43,7 @@ pub fn save_base_data(
     date_time: DateTime<Local>,
     forecast: &Vec<ForecastValues>,
     production: &Vec<ProductionValues>,
+    production_kw: &Vec<ProductionValues>,
     consumption: &Vec<ConsumptionValues>,
     tariffs: Vec<TariffValues>) -> Result<(), BackupError> {
 
@@ -52,6 +54,7 @@ pub fn save_base_data(
             date_time,
             forecast: forecast.clone(),
             production: production.clone(),
+            production_kw: production_kw.clone(),
             consumption: consumption.clone(),
             tariffs,
         };

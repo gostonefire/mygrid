@@ -1,4 +1,5 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone, Timelike};
+use std::collections::HashMap;
+use chrono::{DateTime, Datelike, DurationRound, Local, NaiveDate, NaiveTime, TimeDelta, TimeZone, Timelike};
 use serde::Serialize;
 use crate::{manager_sun};
 use crate::config::{GeoRef, ProductionParameters};
@@ -16,6 +17,7 @@ pub struct ProductionValues {
 /// cloud index. This business logic is implemented in the get_production_factor function.
 pub struct PVProduction {
     production: Vec<ProductionValues>,
+    production_kw: Vec<ProductionValues>,
     lat: f64,
     long: f64,
     min_pv_power: f64,
@@ -38,7 +40,8 @@ impl PVProduction {
     /// * 'location' - GeoRef configuration struct
     pub fn new(config: &ProductionParameters, location: &GeoRef) -> PVProduction {
         PVProduction { 
-            production: Vec::new(), 
+            production: Vec::new(),
+            production_kw: Vec::new(),
             lat: location.lat, 
             long: location.long,
             min_pv_power: config.min_pv_power,
@@ -58,10 +61,10 @@ impl PVProduction {
     /// # Arguments
     /// 
     /// * 'forecast' - whether forecast including cloud index and temperatures per hour
-    pub fn new_estimates(&mut self, forecast: &Vec<ForecastValues>) -> &Vec<ProductionValues> {
+    pub fn new_estimates(&mut self, forecast: &Vec<ForecastValues>) -> (&Vec<ProductionValues>, &Vec<ProductionValues>) {
         self.calculate_hour_pv_production(forecast);
-        
-        &self.production
+
+        (&self.production, &self.production_kw)
     }
     
     /// Calculates hourly PV production based on cloud forecast and sun elevations
@@ -71,6 +74,7 @@ impl PVProduction {
     /// * 'forecast' - the cloud forecast
     fn calculate_hour_pv_production(&mut self, forecast: &Vec<ForecastValues>) {
         let mut pv_production: Vec<ProductionValues> = Vec::new();
+        let mut pv_production_kw: Vec<ProductionValues> = Vec::new();
         let max_south_elev = self.get_max_sun_elevation(self.summer_solstice);
         let min_south_elev = self.get_max_sun_elevation(self.winter_solstice);
 
@@ -96,30 +100,63 @@ impl PVProduction {
 
                 let start_idx = ((start - sunrise) * factor).round().max(0.0) as usize;
                 let end_idx = ((end - sunrise) * factor).round().min(1439.0) as usize;
-                let power = if start_idx != end_idx {
-                    let sum = self.pv_diagram[start_idx..end_idx].iter().enumerate().map(|(i, p)| {
-                        p * max_day_power * self.visibility(start_idx + i, factor, sunrise, v.valid_time)
-                    }).sum::<f64>();
-                    sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor
+                if start_idx != end_idx {
+                    let mut sum = 0.0;
+                    for (i, p) in self.pv_diagram[start_idx..end_idx].iter().enumerate() {
+                        let (vis, dt) = self.visibility(start_idx + i, factor, sunrise, v.valid_time);
+                        let power = p * max_day_power * vis;
+                        pv_production_kw.push(ProductionValues{ valid_time: dt, power });
+                        sum += power;
+                    }
+                    let kwh = sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor;
+                    pv_production.push(ProductionValues{ valid_time: v.valid_time, power: kwh });
                 } else {
-                    0.0f64
+                    pv_production_kw.push(ProductionValues{ valid_time: v.valid_time, power: 0.0 });
+                    pv_production.push(ProductionValues{ valid_time: v.valid_time, power: 0.0 });
                 };
-
-                pv_production.push(ProductionValues{
-                    valid_time: v.valid_time,
-                    power,
-                });
             } else {
-                pv_production.push(ProductionValues{
-                    valid_time: v.valid_time,
-                    power: 0.0,
-                });
+                pv_production_kw.push(ProductionValues{ valid_time: v.valid_time, power: 0.0 });
+                pv_production.push(ProductionValues{ valid_time: v.valid_time, power: 0.0 });
             }
         }
 
+        self.production_kw = self.group_on_time(pv_production_kw);
         self.production = pv_production;
     }
 
+    /// Returns a grouped version of the data input
+    /// Data is grouped by every 5 minutes and the group function is average
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'data' - data to be grouped
+    fn group_on_time(&self, data: Vec<ProductionValues>) -> Vec<ProductionValues> {
+        let mut data_grouped: Vec<ProductionValues> = Vec::new();
+        data
+            .into_iter()
+            .for_each(|d| data_grouped.push(ProductionValues {
+                valid_time: d.valid_time.duration_trunc(TimeDelta::minutes(5)).unwrap(),
+                power: d.power })
+            );
+
+        let mut map: HashMap<DateTime<Local>, (f64, f64)> = HashMap::new();
+
+        for d in data_grouped {
+            let _ = map
+                .entry(d.valid_time)
+                .and_modify(|v|{v.0 += d.power; v.1 += 1.0;})
+                .or_insert((d.power, 1.0));
+        }
+
+        let mut result = map
+            .into_iter()
+            .map(|(d, v)| ProductionValues{ valid_time: d, power: v.0 / v.1 })
+            .collect::<Vec<ProductionValues>>();
+        result.sort_by(|a, b| a.valid_time.cmp(&b.valid_time));
+        
+        result
+    }
+    
     /// Returns visibility factor when sun is behind neighbour houses and also considers
     /// an approximately 10 minutes for sun to go from obscured to visible
     /// 
@@ -129,21 +166,21 @@ impl PVProduction {
     /// * 'factor' - factor between diagram and full day
     /// * 'sunrise' - sunrise in minutes since midnight
     /// * 'date' - date to calculate for (only date part is used from the DateTime object)
-    fn visibility(&self, idx: usize, factor: f64, sunrise: f64, date: DateTime<Local>) -> f64 {
+    fn visibility(&self, idx: usize, factor: f64, sunrise: f64, date: DateTime<Local>) -> (f64, DateTime<Local>) {
         let vis_start = self.visibility_azimuth;
         let vis_done = self.visibility_azimuth + 2.0;
         
-        let minute_of_day = (idx as f64 / factor + sunrise).round() as u32;
-        let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(minute_of_day * 60, 0).unwrap()).unwrap();
+        let second_of_day = ((idx as f64 / factor + sunrise) * 60.0).round() as u32;
+        let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(second_of_day, 0).unwrap()).unwrap();
         let (_, azi) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
         if azi < vis_start {
             // when obscured by surroundings
-            0.1
+            (0.1, date_time)
         } else if azi >= vis_start && azi <= vis_done {
             // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
-            1.0 - (vis_done - azi) * 0.45 
+            (1.0 - (vis_done - azi) * 0.45, date_time) 
         } else {
-            1.0
+            (1.0, date_time)
         }
     }
     

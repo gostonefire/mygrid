@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "mygrid"
-version = "2.6.7"
+version = "2.6.8"
 dependencies = [
  "chrono",
  "glob",
