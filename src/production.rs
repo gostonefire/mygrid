@@ -131,19 +131,11 @@ impl PVProduction {
     /// 
     /// * 'data' - data to be grouped
     fn group_on_time(&self, data: Vec<ProductionValues>) -> Vec<ProductionValues> {
-        let mut data_grouped: Vec<ProductionValues> = Vec::new();
-        data
-            .into_iter()
-            .for_each(|d| data_grouped.push(ProductionValues {
-                valid_time: d.valid_time.duration_trunc(TimeDelta::minutes(5)).unwrap(),
-                power: d.power })
-            );
-
         let mut map: HashMap<DateTime<Local>, (f64, f64)> = HashMap::new();
 
-        for d in data_grouped {
+        for d in data {
             let _ = map
-                .entry(d.valid_time)
+                .entry(d.valid_time.duration_trunc(TimeDelta::minutes(5)).unwrap())
                 .and_modify(|v|{v.0 += d.power; v.1 += 1.0;})
                 .or_insert((d.power, 1.0));
         }
