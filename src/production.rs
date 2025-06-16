@@ -105,7 +105,7 @@ impl PVProduction {
                     for (i, p) in self.pv_diagram[start_idx..end_idx].iter().enumerate() {
                         let (vis, dt) = self.visibility(start_idx + i, factor, sunrise, v.valid_time);
                         let power = p * max_day_power * vis;
-                        pv_production_kw.push(ProductionValues{ valid_time: dt, power });
+                        pv_production_kw.push(ProductionValues{ valid_time: dt, power: power * cloud_factor });
                         sum += power;
                     }
                     let kwh = sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor;
