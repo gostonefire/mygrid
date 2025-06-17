@@ -234,3 +234,9 @@ impl From<PoisonError<RwLockWriteGuard<'_, bool>>> for SkipError {
     fn from(e: PoisonError<RwLockWriteGuard<'_, bool>>) -> Self { SkipError(e.to_string()) }
 }
 
+/// Error depicting errors that occur during Monotonic Cubic Spline interpolation
+/// 
+pub struct SplineError(pub String);
+impl fmt::Display for SplineError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result { write!(f, "SplineError: {}", self.0) }
+}

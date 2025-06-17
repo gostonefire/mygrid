@@ -23,6 +23,7 @@ mod manual;
 mod scheduling;
 mod charge;
 mod config;
+mod spline;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);

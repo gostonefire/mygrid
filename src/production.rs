@@ -3,7 +3,9 @@ use chrono::{DateTime, Datelike, DurationRound, Local, NaiveDate, NaiveTime, Tim
 use serde::Serialize;
 use crate::{manager_sun};
 use crate::config::{GeoRef, ProductionParameters};
+use crate::errors::SplineError;
 use crate::models::smhi_forecast::ForecastValues;
+use crate::spline::MonotonicCubicSpline;
 
 #[derive(Clone, Serialize)]
 pub struct ProductionValues {
@@ -105,7 +107,7 @@ impl PVProduction {
                     for (i, p) in self.pv_diagram[start_idx..end_idx].iter().enumerate() {
                         let (vis, dt) = self.visibility(start_idx + i, factor, sunrise, v.valid_time);
                         let power = p * max_day_power * vis;
-                        pv_production_kw.push(ProductionValues{ valid_time: dt, power: power * cloud_factor });
+                        pv_production_kw.push(ProductionValues{ valid_time: dt, power});
                         sum += power;
                     }
                     let kwh = sum / (end_idx - start_idx) as f64 * border_factor * cloud_factor;
@@ -120,10 +122,32 @@ impl PVProduction {
             }
         }
 
-        self.production_kw = self.group_on_time(pv_production_kw);
+        self.production_kw = self.factor_in_cloud(self.group_on_time(pv_production_kw), forecast).unwrap_or(Vec::new());
         self.production = pv_production;
     }
 
+    /// Factors in cloud factor while using a spline interpolation on the forecast to avoid a 
+    /// jagged line in the backup file 
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'data' - data to factor in cloud factor on
+    /// * 'forecast' - the cloud forecast
+    fn factor_in_cloud(&self, data: Vec<ProductionValues>, forecast: &Vec<ForecastValues>) -> Result<Vec<ProductionValues>, SplineError> {
+        let x = forecast.iter().map(|f| f.valid_time.timestamp() as f64).collect::<Vec<f64>>();
+        let y = forecast.iter().map(|c| c.cloud_factor * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor)).collect::<Vec<f64>>();
+        let spline = MonotonicCubicSpline::new(&x, &y)?;
+        
+        let r = data.iter().map(|p| {
+            ProductionValues{ 
+                valid_time: p.valid_time, 
+                power: p.power * spline.interpolate(p.valid_time.timestamp() as f64).max(0.0).min(1.0), 
+            }
+        }).collect::<Vec<ProductionValues>>();
+        
+        Ok(r)
+    }
+    
     /// Returns a grouped version of the data input
     /// Data is grouped by every 5 minutes and the group function is average
     /// 
