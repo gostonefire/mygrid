@@ -29,10 +29,10 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     let args: Vec<String> = env::args().collect();
     let config_path = args.iter()
         .find(|p| p.starts_with("--config="))
-        .ok_or(MyGridInitError::from("missing --config=<config_path>"))?;
+        .expect("config file argument should be present");
     let config_path = config_path
         .split_once('=')
-        .ok_or(MyGridInitError::from("invalid --config=<config_path>"))?
+        .expect("config file argument should be correct")
         .1;
 
     // Print version
