@@ -1,5 +1,4 @@
 use std::env;
-use std::str::FromStr;
 use crate::{DEBUG_MODE};
 use crate::backup::{load_last_charge, load_active_block};
 use crate::charge::LastCharge;
@@ -27,22 +26,26 @@ pub struct Mgr {
 /// an optional LastCharge struct, and an optional active block
 ///
 pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGridInitError> {
-    let config_dir = env::var("CONFIG_DIR")
-        .expect("Error getting CONFIG_DIR");
-
-    let debug_mode = env::var("DEBUG_MODE").unwrap_or("false".to_string());
-    {
-        *DEBUG_MODE.write()? = bool::from_str(debug_mode.as_str()).unwrap_or(false);
-        if *DEBUG_MODE.read()? {
-            println!("Running in Debug Mode!!");
-        }
-    }
+    let args: Vec<String> = env::args().collect();
+    let config_path = args.iter()
+        .find(|p| p.starts_with("--config="))
+        .ok_or(MyGridInitError::from("missing --config=<config_path>"))?;
+    let config_path = config_path
+        .split_once('=')
+        .ok_or(MyGridInitError::from("invalid --config=<config_path>"))?
+        .1;
 
     // Print version
     println!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
 
     // Load configuration
-    let config = load_config(&config_dir)?;
+    let config = load_config(&config_path)?;
+
+    // Set debug mode on/off
+    *DEBUG_MODE.write()? = config.general.debug_mode;
+    if *DEBUG_MODE.read()? {
+        println!("Running in Debug Mode!!");
+    }
     
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);

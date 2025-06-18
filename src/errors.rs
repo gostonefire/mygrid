@@ -46,6 +46,9 @@ impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridInitError {
 impl From<PoisonError<RwLockWriteGuard<'_, bool>>> for MyGridInitError {
     fn from(e: PoisonError<RwLockWriteGuard<'_, bool>>) -> Self { MyGridInitError(e.to_string()) }
 }
+impl From<&str> for MyGridInitError {
+    fn from(e: &str) -> Self { MyGridInitError(e.to_string()) }
+}
 
 
 /// Error depicting errors that occur while running the main program

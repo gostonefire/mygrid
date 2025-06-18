@@ -63,7 +63,17 @@ pub struct Files {
     pub backup_dir: String,
     pub stats_dir: String,
     pub manual_file: String,
+    pub pv_diagram: String,
+    pub cons_diagram: String,
 }
+
+#[derive(Deserialize)]
+pub struct General {
+    pub log_path: String,
+    pub log_to_stdout: bool,
+    pub debug_mode: bool,
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub geo_ref: GeoRef,
@@ -73,6 +83,7 @@ pub struct Config {
     pub fox_ess: FoxESS,
     pub mail: MailParameters,
     pub files: Files,
+    pub general: General,
 }
 
 #[derive(Deserialize)]
@@ -100,15 +111,14 @@ struct HouseHoldConsumption {
 /// 
 /// # Arguments
 /// 
-/// * 'config_dir' - directory where to find configuration file
-pub fn load_config(config_dir: &str) -> Result<Config, ConfigError> {
-    let file_path = format!("{}config.toml", config_dir);
+/// * 'config_path' - path to the configuration file
+pub fn load_config(config_path: &str) -> Result<Config, ConfigError> {
     
-    let toml = fs::read_to_string(file_path)?;
+    let toml = fs::read_to_string(config_path)?;
     let mut config: Config = toml::from_str(&toml)?;
     
-    let pv_diagram = load_pv_diagram(config_dir)?;
-    let cons_diagram = load_consumption_diagram(config_dir)?;
+    let pv_diagram = load_pv_diagram(&config.files.pv_diagram)?;
+    let cons_diagram = load_consumption_diagram(&config.files.cons_diagram)?;
     
     config.production.diagram = Some(pv_diagram);
     config.consumption.diagram = Some(cons_diagram);
@@ -120,11 +130,10 @@ pub fn load_config(config_dir: &str) -> Result<Config, ConfigError> {
 ///
 /// # Arguments
 ///
-/// * 'config_dir' - the directory where to find config files
-fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], ConfigError> {
-    let file_path = format!("{}pv_diagram.json", config_dir);
+/// * 'diagram_path' - path to the pv diagram file
+fn load_pv_diagram(diagram_path: &str) -> Result<[f64;1440], ConfigError> {
 
-    let path = Path::new(&file_path);
+    let path = Path::new(&diagram_path);
     if path.exists() {
         let mut result: [f64;1440] = [0.0;1440];
 
@@ -149,11 +158,10 @@ fn load_pv_diagram(config_dir: &str) -> Result<[f64;1440], ConfigError> {
 ///
 /// # Arguments
 ///
-/// * 'config_dir' - the directory where to find config files
-fn load_consumption_diagram(config_dir: &str) -> Result<[[f64;24];7], ConfigError> {
-    let file_path = format!("{}consumption_diagram.toml", config_dir);
-
-    let toml = fs::read_to_string(file_path)?;
+/// * 'diagram_path' - path to the consumption diagram file
+fn load_consumption_diagram(diagram_path: &str) -> Result<[[f64;24];7], ConfigError> {
+    
+    let toml = fs::read_to_string(diagram_path)?;
     let hhc: HouseHoldConsumption = toml::from_str(&toml)?;
     
     let days: [[f64;24];7] = [
