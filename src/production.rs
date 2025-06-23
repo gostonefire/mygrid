@@ -29,7 +29,7 @@ pub struct PVProduction {
     winter_solstice: (u32, u32),
     sunrise_angle: f64,
     sunset_angle: f64,
-    visibility_azimuth: f64,
+    visibility_alt: f64,
     pv_diagram: [f64; 1440],
 }
 
@@ -53,7 +53,7 @@ impl PVProduction {
             winter_solstice: config.winter_solstice,
             sunrise_angle: config.sunrise_angle,
             sunset_angle: config.sunset_angle,
-            visibility_azimuth: config.visibility_azimuth,
+            visibility_alt: config.visibility_alt,
             pv_diagram: config.diagram.unwrap() 
         }
     }
@@ -183,18 +183,18 @@ impl PVProduction {
     /// * 'sunrise' - sunrise in minutes since midnight
     /// * 'date' - date to calculate for (only date part is used from the DateTime object)
     fn visibility(&self, idx: usize, factor: f64, sunrise: f64, date: DateTime<Local>) -> (f64, DateTime<Local>) {
-        let vis_start = self.visibility_azimuth;
-        let vis_done = self.visibility_azimuth + 2.0;
+        let vis_start = self.visibility_alt;
+        let vis_done = self.visibility_alt + 2.0;
         
         let second_of_day = ((idx as f64 / factor + sunrise) * 60.0).round() as u32;
         let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(second_of_day, 0).unwrap()).unwrap();
-        let (_, azi) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
-        if azi < vis_start {
+        let (alt, _) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
+        if alt < vis_start {
             // when obscured by surroundings
             (0.1, date_time)
-        } else if azi >= vis_start && azi <= vis_done {
+        } else if alt >= vis_start && alt <= vis_done {
             // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
-            (1.0 - (vis_done - azi) * 0.45, date_time) 
+            (1.0 - (vis_done - alt) * 0.45, date_time) 
         } else {
             (1.0, date_time)
         }
