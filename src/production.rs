@@ -188,11 +188,11 @@ impl PVProduction {
         
         let second_of_day = ((idx as f64 / factor + sunrise) * 60.0).round() as u32;
         let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(second_of_day, 0).unwrap()).unwrap();
-        let (alt, _) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
-        if alt < vis_start {
+        let (alt, azi) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
+        if alt < vis_start && azi < 180.0 {
             // when obscured by surroundings
             (0.1, date_time)
-        } else if alt >= vis_start && alt <= vis_done {
+        } else if alt >= vis_start && alt <= vis_done && azi < 180.0 {
             // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
             (1.0 - (vis_done - alt) * 0.45, date_time) 
         } else {
