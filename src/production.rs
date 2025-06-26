@@ -13,6 +13,13 @@ pub struct ProductionValues {
     pub power: f64
 }
 
+struct AzimuthFactor {
+    am_m: f64,
+    am_b: f64,
+    pm_m: f64,
+    pm_b: f64,
+}
+
 /// Struct for calculating and holding PV production per hour given a whether forecast
 ///
 /// The implementation includes business logic for the factor between sun elevation and
@@ -31,6 +38,7 @@ pub struct PVProduction {
     sunset_angle: f64,
     visibility_alt: f64,
     pv_diagram: [f64; 1440],
+    azimuth_factor: AzimuthFactor,
 }
 
 impl PVProduction {
@@ -41,6 +49,11 @@ impl PVProduction {
     /// * 'config' - ProductionParameters configuration struct
     /// * 'location' - GeoRef configuration struct
     pub fn new(config: &ProductionParameters, location: &GeoRef) -> PVProduction {
+        let am_m = (1.0 - 0.0) / (100.0 - 0.0);
+        let am_b = 0.0;
+        let pm_m = (0.0 - 1.0) / (360.0 - 245.0);
+        let pm_b = 0.0 - 360.0 * pm_m;
+        
         PVProduction { 
             production: Vec::new(),
             production_kw: Vec::new(),
@@ -54,7 +67,8 @@ impl PVProduction {
             sunrise_angle: config.sunrise_angle,
             sunset_angle: config.sunset_angle,
             visibility_alt: config.visibility_alt,
-            pv_diagram: config.diagram.unwrap() 
+            pv_diagram: config.diagram.unwrap(),
+            azimuth_factor: AzimuthFactor { am_m, am_b, pm_m, pm_b },
         }
     }
 
@@ -176,6 +190,9 @@ impl PVProduction {
     /// Returns visibility factor when sun is behind neighbour houses and also considers
     /// an approximately 10 minutes for sun to go from obscured to visible
     /// 
+    /// Also, the visibility takes into account that far off sun azimuth in relation to PV head on does 
+    /// have a negative impact on power generation. This is mostly a factor in the morning and afternoon.
+    /// 
     /// # Arguments
     /// 
     /// * 'idx' - the current index in the pv_diagram
@@ -189,15 +206,25 @@ impl PVProduction {
         let second_of_day = ((idx as f64 / factor + sunrise) * 60.0).round() as u32;
         let date_time = date.with_time(NaiveTime::from_num_seconds_from_midnight_opt(second_of_day, 0).unwrap()).unwrap();
         let (alt, azi) = manager_sun::get_elevation_and_azimuth(date_time, self.lat, self.long);
-        if alt < vis_start && azi < 180.0 {
-            // when obscured by surroundings
-            (0.1, date_time)
-        } else if alt >= vis_start && alt <= vis_done && azi < 180.0 {
-            // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
-            (1.0 - (vis_done - alt) * 0.45, date_time) 
+        
+        let v_factor = if azi < 180.0 {
+            let azf = (azi * self.azimuth_factor.am_m + self.azimuth_factor.am_b).min(1.0);
+            let obf = if alt < vis_start {
+                // when obscured by surroundings
+                0.15
+            } else if alt >= vis_start && alt <= vis_done {
+                // approximately 10 minutes in azimuth for sun to be non-obscured by surroundings
+                1.0 - (vis_done - alt) * 0.425
+            } else {
+                1.0
+            };
+
+            azf * obf
         } else {
-            (1.0, date_time)
-        }
+            (azi * self.azimuth_factor.pm_m + self.azimuth_factor.pm_b).min(1.0)
+        };
+
+        (v_factor, date_time)
     }
     
     /// Calculates the top sun power production given the sun top elevation for the day
