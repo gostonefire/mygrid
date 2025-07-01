@@ -30,6 +30,14 @@ pub struct ProductionParameters {
     pub sunrise_angle: f64,
     pub sunset_angle: f64,
     pub visibility_alt: f64,
+    pub am_x1: f64,
+    pub am_y1: f64,
+    pub am_x2: f64,
+    pub am_y2: f64,
+    pub pm_x1: f64,
+    pub pm_y1: f64,
+    pub pm_x2: f64,
+    pub pm_y2: f64,
     #[serde(skip)]
     pub diagram: Option<[f64;1440]>,
 }

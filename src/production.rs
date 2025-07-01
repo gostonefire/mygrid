@@ -49,10 +49,10 @@ impl PVProduction {
     /// * 'config' - ProductionParameters configuration struct
     /// * 'location' - GeoRef configuration struct
     pub fn new(config: &ProductionParameters, location: &GeoRef) -> PVProduction {
-        let am_m = (1.0 - 0.0) / (100.0 - 0.0);
-        let am_b = 0.0;
-        let pm_m = (0.0 - 1.0) / (360.0 - 245.0);
-        let pm_b = 0.0 - 360.0 * pm_m;
+        let am_m = (config.am_y2 - config.am_y1) / (config.am_x2 - config.am_x1);
+        let am_b = config.am_y1 - config.am_x1 * am_m;
+        let pm_m = (config.pm_y2 - config.pm_y1) / (config.pm_x2 - config.pm_x1);
+        let pm_b = config.pm_y1 - config.pm_x1 * am_m;
         
         PVProduction { 
             production: Vec::new(),
