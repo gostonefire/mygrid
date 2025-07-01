@@ -52,7 +52,7 @@ impl PVProduction {
         let am_m = (config.am_y2 - config.am_y1) / (config.am_x2 - config.am_x1);
         let am_b = config.am_y1 - config.am_x1 * am_m;
         let pm_m = (config.pm_y2 - config.pm_y1) / (config.pm_x2 - config.pm_x1);
-        let pm_b = config.pm_y1 - config.pm_x1 * am_m;
+        let pm_b = config.pm_y1 - config.pm_x1 * pm_m;
         
         PVProduction { 
             production: Vec::new(),
