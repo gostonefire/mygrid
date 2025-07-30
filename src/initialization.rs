@@ -1,10 +1,12 @@
 use std::env;
+use log::info;
 use crate::{DEBUG_MODE};
 use crate::backup::{load_last_charge, load_active_block};
 use crate::charge::LastCharge;
 use crate::config::{load_config, Config};
 use crate::consumption::Consumption;
 use crate::errors::{MyGridInitError};
+use crate::logging::setup_logger;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
@@ -35,16 +37,20 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
         .expect("config file argument should be correct")
         .1;
 
-    // Print version
-    println!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
 
     // Load configuration
     let config = load_config(&config_path)?;
 
+    // Setup logging
+    let _ = setup_logger(&config.general.log_path, config.general.log_level, config.general.log_to_stdout)?;
+
+    // Print version
+    info!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
+
     // Set debug mode on/off
     *DEBUG_MODE.write()? = config.general.debug_mode;
     if *DEBUG_MODE.read()? {
-        println!("Running in Debug Mode!!");
+        info!("running in Debug Mode!!");
     }
     
     // Instantiate structs

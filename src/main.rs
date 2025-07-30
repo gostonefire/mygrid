@@ -2,6 +2,7 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local};
+use log::error;
 use crate::initialization::init;
 use crate::manager_mail::Mail;
 use crate::worker::run;
@@ -24,6 +25,7 @@ mod scheduling;
 mod charge;
 mod config;
 mod spline;
+mod logging;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
@@ -47,6 +49,7 @@ fn main() {
         match run(config, &mut mgr, last_charge, active_block) {
             Ok(()) => return,
             Err(e) => {
+                error!("{}", e);
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mgr.mail));
             }
         }

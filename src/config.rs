@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use log::LevelFilter;
 use serde::Deserialize;
 use crate::errors::ConfigError;
 
@@ -80,6 +81,7 @@ pub struct Files {
 #[derive(Deserialize)]
 pub struct General {
     pub log_path: String,
+    pub log_level: LevelFilter,
     pub log_to_stdout: bool,
     pub debug_mode: bool,
 }

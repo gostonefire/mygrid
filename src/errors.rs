@@ -174,6 +174,12 @@ impl From<serde_json::Error> for ConfigError {
         ConfigError(e.to_string())
     }
 }
+impl From<log4rs::config::runtime::ConfigErrors> for ConfigError {
+    fn from(e: log4rs::config::runtime::ConfigErrors) -> Self { ConfigError(e.to_string()) }
+}
+impl From<log::SetLoggerError> for ConfigError {
+    fn from(e: log::SetLoggerError) -> Self { ConfigError(e.to_string()) }
+}
 
 /// Error depicting errors that occur while creating and managing schedules
 ///

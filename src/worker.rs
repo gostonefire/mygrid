@@ -1,5 +1,6 @@
 use std::thread;
 use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
+use log::info;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics, save_schedule};
@@ -7,7 +8,6 @@ use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, La
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
-use crate::manager_mail::Mail;
 use crate::scheduling::{update_schedule, Block, BlockType, Schedule, Status};
 use crate::manual::check_manual;
 
@@ -25,9 +25,9 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
         // Check if we should go into manual mode for today
         if let Some(manual_mode) = check_manual(&config.files.manual_file, local_now)? {
             if manual_mode {
-                print_msg("Manual mode activated for today", "Update", None);
+                info!("manual mode activated for today");
             } else {
-                print_msg("Manual mode deactivated for today", "Update", None);
+                info!("manual mode deactivated for today");
             }
         }
 
@@ -99,7 +99,7 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
             save_schedule(&config.files.backup_dir, &mgr.schedule)?;
             active_block = Some(block);
 
-            print_schedule(&mgr.schedule,"Update", None);
+            log_schedule(&mgr.schedule);
         }
     }
 }
@@ -140,7 +140,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
     let delta = (now - dt).abs();
 
     if delta > Duration::minutes(1) {
-        print_msg("Setting inverter time", "Update", None);
+        info!("setting inverter time");
         let _ = fox.set_device_time(now)?;
     }
 
@@ -161,7 +161,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 /// * 'block' - the configuration to use
 fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
-    print_msg("Setting charge block", "Update", None);
+    info!("setting charge block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
@@ -195,7 +195,7 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
 fn set_full_if_done(fox: &Fox, max_soc: usize) -> Result<Option<Status>, MyGridWorkerError> {
     let soc= retry!(||fox.get_current_soc())? as usize;
     if soc >= max_soc {
-        print_msg("Setting charge block to full", "Update", None);
+        info!("setting charge block to full");
         if is_manual_debug()? {return Ok(Some(Status::Full(soc)))}
 
         let min_soc = max_soc.max(10).min(100);
@@ -227,7 +227,7 @@ fn set_full_if_done(fox: &Fox, max_soc: usize) -> Result<Option<Status>, MyGridW
 /// * 'fox' - reference to the Fox struct
 /// * 'max_min_soc' - max min soc allowed for the block
 fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
-    print_msg("Setting hold block", "Update", None);
+    info!("setting hold block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
     let soc = retry!(||fox.get_current_soc())?;
@@ -251,7 +251,7 @@ fn set_hold(fox: &Fox, max_min_soc: u8) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'fox' - reference to the Fox struct
 fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
-    print_msg("Setting use block", "Update", None);
+    info!("setting use block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
@@ -270,44 +270,14 @@ fn get_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
     Ok(retry!(||fox.get_current_soc())?)
 }
 
-/// Prints a schedule, i.e. its blocks, with a caption
+/// Logs a schedule, i.e. its blocks
 ///
 /// # Arguments
 ///
-/// * 'schedule' - the schedule to print
-/// * 'caption' - the caption to print
-/// * 'mail' - mail sender struct
-fn print_schedule(schedule: &Schedule, caption: &str, mail: Option<&Mail>) {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    let caption = format!("{} {} ", report_time, caption);
-
-    let mut msg = format!("{:=<181}\n", caption.to_string() + " ");
+/// * 'schedule' - the schedule to log
+fn log_schedule(schedule: &Schedule) {
     for s in &schedule.blocks {
-        msg += &format!("{}\n", s);
-    }
-    println!("{}", msg);
-
-    if let Some(m) = mail {
-        let _ = m.send_mail(caption.to_string(), msg);
-    }
-}
-
-/// Prints a message with a caption
-///
-/// # Arguments
-///
-/// * 'message' - the message
-/// * 'caption' - the caption to print
-/// * 'mail' - mail sender struct
-fn print_msg(message: &str, caption: &str, mail: Option<&Mail>) {
-    let report_time = format!("{}", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    let caption = format!("{} {} ", report_time, caption);
-
-    let msg = format!("{:=<181}\n{}\n", caption.to_string() + " ", message);
-    println!("{}", msg);
-
-    if let Some(m) = mail {
-        let _ = m.send_mail(caption.to_string(), msg);
+        info!("{}", s);
     }
 }
 

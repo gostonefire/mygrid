@@ -268,9 +268,7 @@ impl Fox {
         };
         let req_json = serde_json::to_string(&req)?;
 
-        let json = self.post_request(&path, req_json)?;
-
-        println!("{}", json);
+        let _ = self.post_request(&path, req_json)?;
 
         Ok(())
     }
