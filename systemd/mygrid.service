@@ -1,0 +1,16 @@
+[Unit]
+Description=Mygrid scheduling service
+After=network-online.target
+
+[Service]
+ExecStart=/bin/bash /home/petste/MyGrid/start.sh
+WorkingDirectory=/home/petste/MyGrid/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+RestartSec=30
+User=petste
+
+[Install]
+WantedBy=multi-user.target
+
