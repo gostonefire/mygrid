@@ -1,16 +1,16 @@
 pub mod errors;
 
-use std::time::Duration;
-use ureq::Agent;
+use lettre::message::Mailbox;
+use lettre::{Message, SmtpTransport, Transport};
+use lettre::message::header::ContentType;
+use lettre::transport::smtp::authentication::Credentials;
 use crate::config::MailParameters;
 use crate::manager_mail::errors::MailError;
-use crate::models::sendgrid::{Address, Content, Email, Personalizations};
 
 pub struct Mail {
-    api_key: String,
-    agent: Agent,
-    from: Address,
-    to: Address,
+    sender: SmtpTransport,
+    from: Mailbox,
+    to: Mailbox,
 }
 
 impl Mail {
@@ -18,22 +18,21 @@ impl Mail {
     ///
     /// # Arguments
     ///
-    /// * 'api_key' - the api key for sendgrid
-    /// * 'from' - sender email address
-    /// * 'to' - receiver email address
+    /// * 'config' - mail configuration parameters
     pub fn new(config: &MailParameters) -> Result<Self, MailError> {
-        let agent_config = Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
+        let credentials = Credentials::new(config.smtp_user.to_owned(), config.smtp_password.to_owned());
+        let sender = SmtpTransport::relay(&config.smtp_endpoint)?
+            .credentials(credentials)
             .build();
 
-        let agent = agent_config.into();
+        let from = config.from.parse::<Mailbox>()?;
+        let to = config.to.parse::<Mailbox>()?;
 
         Ok(
             Self {
-                agent,
-                api_key: config.api_key.to_string(),
-                from: config.from.parse::<Address>()?,
-                to: config.to.parse::<Address>()?,
+                sender,
+                from,
+                to,
             }
         )
     }
@@ -46,20 +45,14 @@ impl Mail {
     /// * 'body' - the body of the mail
     pub fn send_mail(&self, subject: String, body: String) -> Result<(), MailError> {
 
-        let req = Email {
-            personalizations: vec![Personalizations { to: vec![self.to.clone()]}],
-            from: self.from.clone(),
-            subject,
-            content: vec![Content { content_type: "text/plain".to_string(), value: body }],
-        };
+        let message = Message::builder()
+            .from(self.from.clone())
+            .to(self.to.clone())
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body)?;
 
-        let json = serde_json::to_string(&req)?;
-
-        let _ = self.agent
-            .post("https://api.sendgrid.com/v3/mail/send")
-            .content_type("application/json")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send(json)?;
+        self.sender.send(&message)?;
 
         Ok(())
     }

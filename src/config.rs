@@ -61,7 +61,9 @@ pub struct FoxESS {
 
 #[derive(Deserialize)]
 pub struct MailParameters {
-    pub api_key: String,
+    pub smtp_user: String,
+    pub smtp_password: String,
+    pub smtp_endpoint: String,
     pub from: String,
     pub to: String,
 }

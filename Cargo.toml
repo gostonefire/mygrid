@@ -1,6 +1,6 @@
 [package]
 name = "mygrid"
-version = "2.7.1"
+version = "2.7.2"
 edition = "2021"
 
 [dependencies]
@@ -8,8 +8,9 @@ md-5 = "0.10.6"
 chrono = "0.4"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_with = { version = "3.12", features = ["chrono"] }
-trig = "0.1"
+serde_with = { version = "3.14", features = ["chrono"] }
+trig = "0.2"
 ureq = "3.0"
-toml = "0.8"
+toml = "0.9"
 glob = "0.3"
+lettre = "0.11"
