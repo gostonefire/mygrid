@@ -1,6 +1,6 @@
 use std::env;
 use log::info;
-use crate::{DEBUG_MODE};
+use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
 use crate::backup::{load_last_charge, load_active_block};
 use crate::charge::LastCharge;
 use crate::config::{load_config, Config};
@@ -42,7 +42,10 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     let config = load_config(&config_path)?;
 
     // Setup logging
-    let _ = setup_logger(&config.general.log_path, config.general.log_level, config.general.log_to_stdout)?;
+    if !*LOGGER_INITIALIZED.read()? {
+        let _ = setup_logger(&config.general.log_path, config.general.log_level, config.general.log_to_stdout)?;
+    }
+    *LOGGER_INITIALIZED.write()? = true;
 
     // Print version
     info!("mygrid version: {}", env!("CARGO_PKG_VERSION"));

@@ -33,6 +33,8 @@ static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
 /// Manual day mode means no write operations to inverter (except time)
 static MANUAL_DAY: RwLock<bool> = RwLock::new(false);
 
+static LOGGER_INITIALIZED: RwLock<bool> = RwLock::new(false);
+
 fn main() {
     let mut n_errors = 0;
     let mut last_error = Local::now();
