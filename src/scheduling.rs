@@ -4,7 +4,7 @@ use std::thread;
 use chrono::{DateTime, DurationRound, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::ConsumptionValues;
-use crate::production::ProductionValues;
+use crate::production_legacy::ProductionValues;
 use std::collections::HashMap;
 use std::ops::Add;
 use crate::errors::SchedulingError;

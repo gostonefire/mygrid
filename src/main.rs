@@ -12,7 +12,7 @@ mod manager_fox_cloud;
 mod manager_sun;
 mod models;
 mod manager_smhi;
-mod production;
+mod production_legacy;
 mod consumption;
 mod macros;
 mod initialization;

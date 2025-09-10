@@ -11,7 +11,7 @@ use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
 use crate::manager_smhi::SMHI;
-use crate::production::PVProduction;
+use crate::production_legacy::PVProduction;
 use crate::scheduling::{Block, Schedule};
 
 pub struct Mgr {

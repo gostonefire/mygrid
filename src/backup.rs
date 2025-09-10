@@ -14,7 +14,7 @@ use crate::{retry, wrapper};
 use crate::charge::LastCharge;
 use crate::consumption::ConsumptionValues;
 use crate::models::nordpool_tariffs::TariffValues;
-use crate::production::ProductionValues;
+use crate::production_legacy::ProductionValues;
 use crate::scheduling::{Block, Schedule};
 
 
