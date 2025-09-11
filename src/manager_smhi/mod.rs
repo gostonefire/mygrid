@@ -61,11 +61,11 @@ impl SMHI {
     /// * 'date_time' - the date to get a forecast for
     pub fn new_forecast(&mut self, date_time: DateTime<Local>) -> Result<Vec<ForecastValues>, SMHIError> {
         let smhi_domain = "https://opendata-download-metfcst.smhi.se";
-        let base_url = "/api/category/pmp3g/version/2/geotype/point";
+        let base_url = "/api/category/snow1g/version/1/geotype/point";
         let url = format!("{}{}/lon/{:0.4}/lat/{:0.4}/data.json",
                           smhi_domain, base_url, self.long, self.lat);
 
-        let date = date_time.date_naive();
+        let date = date_time.duration_trunc(TimeDelta::days(1)).unwrap();
         let next_date = date.add(TimeDelta::days(1));
 
         let json = self.agent
@@ -79,26 +79,18 @@ impl SMHI {
         let mut forecast: Vec<ForecastValues> = Vec::new();
 
         for ts in tmp_forecast.time_series {
-            let forecast_date = ts.valid_time.date_naive();
+            let forecast_time = ts.time.with_timezone(&Local);
+            let forecast_date = forecast_time.duration_trunc(TimeDelta::days(1)).unwrap();
             if forecast_date == date || forecast_date == next_date {
-                let mut time_values = ForecastValues {
-                    valid_time: ts.valid_time.duration_trunc(TimeDelta::hours(1)).unwrap(),
-                    temp: 0.0,
-                    lcc_mean: 0.0,
-                    mcc_mean: 0.0,
-                    hcc_mean: 0.0,
+                let time_values = ForecastValues {
+                    valid_time: forecast_time,
+                    temp: ts.data.air_temperature,
+                    lcc_mean: ts.data.low_type_cloud_area_fraction,
+                    mcc_mean: ts.data.medium_type_cloud_area_fraction,
+                    hcc_mean: ts.data.high_type_cloud_area_fraction,
                     cloud_factor: 0.0,
                 };
 
-                for params in ts.parameters {
-                    match params.name.as_str() {
-                        "lcc_mean" => time_values.lcc_mean = params.values[0],
-                        "mcc_mean" => time_values.mcc_mean = params.values[0],
-                        "hcc_mean" => time_values.hcc_mean = params.values[0],
-                        "t" => time_values.temp = params.values[0],
-                        _ => (),
-                    }
-                }
                 forecast.push(time_values);
             }
         }

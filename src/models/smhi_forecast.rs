@@ -1,18 +1,20 @@
 use serde::{Deserialize, Serialize};
 use serde_with::chrono::DateTime;
-use chrono::Local;
+use chrono::{Local, Utc};
 
 #[derive(Deserialize)]
-pub struct FullParameters {
-    pub name: String,
-    pub values: Vec<f64>,
+pub struct Data {
+    pub air_temperature: f64,
+    pub low_type_cloud_area_fraction: f64,
+    pub medium_type_cloud_area_fraction: f64,
+    pub high_type_cloud_area_fraction: f64,
 }
+
 
 #[derive(Deserialize)]
 pub struct FullTimeSeries {
-    #[serde(rename = "validTime")]
-    pub valid_time: DateTime<Local>,
-    pub parameters: Vec<FullParameters>,
+    pub time: DateTime<Utc>,
+    pub data: Data,
 }
 
 
