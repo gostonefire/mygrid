@@ -2,7 +2,7 @@ pub mod errors;
 
 use std::str::FromStr;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use ureq::Agent;
@@ -58,27 +58,6 @@ impl Fox {
         Ok(fox_data.result[0].datas[0].value.round() as u8)
     }
 
-    /*
-    /// Obtain the inverter battery min soc on grid setting
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
-    ///
-    /// # Arguments
-    ///
-    pub fn get_min_soc_on_grid(&self) -> Result<u8, String> {
-        let path = "/op/v0/device/setting/get";
-
-        let req = RequestSoc { sn: self.sn.clone(), key: "MinSocOnGrid".to_string() };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-        let json = self.post_request(&path, req_json)?;
-
-        let fox_data: SocSettingResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-
-        Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
-    }
-    */
-
     /// Set the inverter battery min soc on grid setting
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20settings20item0a3ca20id3dset20the20device20settings20item4303e203ca3e
@@ -96,28 +75,6 @@ impl Fox {
 
         Ok(())
     }
-
-    /*
-    /// Obtain the inverter battery max soc
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20settings20item0a3ca20id3dget20the20device20settings20item4303e203ca3e
-    ///
-    /// # Arguments
-    ///
-    /// * 'sn' - the serial number of the inverter
-    pub fn get_max_soc(&self, sn: &str) -> Result<u8, String> {
-        let path = "/op/v0/device/setting/get";
-
-        let req = RequestSoc { sn: sn.to_string(), key: "MaxSoc".to_string() };
-        let req_json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-        let json = self.post_request(&path, req_json)?;
-
-        let fox_data: SocSettingResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-
-        Ok(u8::from_str(&fox_data.result.value).map_err(|e| e.to_string())?)
-    }
-    */
 
     /// Set the inverter battery max soc setting
     ///
@@ -150,7 +107,7 @@ impl Fox {
 
         let req = RequestDeviceHistoryData {
             sn: self.sn.clone(),
-            variables: ["pvPower", "loadsPower", "SoC"]
+            variables: ["SoC"]
                 .iter().map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             begin: start.timestamp_millis(),
@@ -162,26 +119,10 @@ impl Fox {
         let json = self.post_request(&path, req_json)?;
 
         let fox_data: DeviceHistoryResult = serde_json::from_str(&json)?;
-        let device_history = transform_history_data(start.with_timezone(&Local).date_naive(), fox_data.result)?;
+        let device_history = transform_history_data(fox_data.result)?;
 
         Ok(device_history)
     }
-
-    /*
-    /// Obtain the battery charging time schedule.
-    /// This is the standard charging scheduler setting.
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20setting20of20battery20charging20time0a3ca20id3dget20the20setting20of20battery20charging20time4303e203ca3e
-    ///
-    pub fn get_battery_charging_time_schedule(&self) -> Result<ChargingTimeSchedule, String> {
-        let path = "/op/v0/device/battery/forceChargeTime/get";
-        let json = self.get_request(&path,vec![("sn", self.sn.clone())])?;
-
-        let fox_data: ChargingTimeResult = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-
-        Ok(fox_data.result)
-    }
-    */
 
     /// Set the battery charging time schedule.
     /// This is the standard charging scheduler setting.
@@ -272,32 +213,6 @@ impl Fox {
 
         Ok(())
     }
-
-    /*
-    /// Builds a request and sends it as a GET.
-    /// The return is the json representation of the result as specified by
-    /// respective FoxESS API
-    ///
-    /// # Arguments
-    ///
-    /// * path - the API path excluding the domain
-    /// * query - a vector of tuples with query parameters
-    fn get_request(&self, path: &str, query: Vec<(&str, &str)>) -> Result<String, String> {
-        let url = format!("{}{}", REQUEST_DOMAIN, path);
-        let header = self.generate_header(&path);
-
-        let res = self.client
-            .get(url)
-            .headers(header)
-            .query(&query)
-            .send()
-            .map_err(|e| format!("Get request error: {}", e.to_string()))?;
-
-        let json = Fox::get_check_response(res)?;
-
-        Ok(json)
-    }
-    */
 
     /// Builds a request and sends it as a POST.
     /// The return is the json representation of the result as specified by
@@ -470,32 +385,16 @@ impl Fox {
     }
 }
 
-/// Transforms device history data to a format easier to save as non-json file
+/// Transforms device history data
 ///
 /// # Arguments
 ///
-/// * 'date' - the date the data is valid for
 /// * 'input' - the data to transform
-fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Result<DeviceHistory, FoxError> {
-    let mut time: Vec<String> = Vec::new();
-    let mut pv_power: Vec<f64> = Vec::new();
-    let mut ld_power: Vec<f64> = Vec::new();
+fn transform_history_data(input: Vec<DeviceHistoryData>) -> Result<DeviceHistory, FoxError> {
     let mut soc: Vec<u8> = Vec::new();
 
     for set in &input[0].data_set {
-        if set.variable == "pvPower" {
-            for data in &set.data {
-                let ndt = NaiveDateTime::parse_from_str(&data.time, "%Y-%m-%d %H:%M:%S %Z")?
-                    .format("%Y-%m-%d %H:%M").to_string();
-
-                time.push(ndt);
-                pv_power.push(data.value);
-            }
-        } else if set.variable == "loadsPower" {
-            for data in &set.data {
-                ld_power.push(data.value);
-            }
-        } else if set.variable == "SoC" {
+        if set.variable == "SoC" {
             for data in &set.data {
                 soc.push(data.value as u8);
             }
@@ -503,10 +402,6 @@ fn transform_history_data(date: NaiveDate, input: Vec<DeviceHistoryData>) -> Res
     }
 
     Ok(DeviceHistory {
-        date,
-        time,
-        pv_power,
-        ld_power,
         soc,
     })
 }

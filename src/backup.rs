@@ -1,16 +1,10 @@
 use std::fs;
-use std::fs::File;
-use std::io::Write;
-use std::ops::Add;
 use std::path::Path;
-use std::thread;
 use chrono::{DateTime, Duration, DurationRound, Local, NaiveDateTime, TimeDelta, Utc};
 use glob::glob;
 use serde::Serialize;
 use crate::errors::BackupError;
-use crate::manager_fox_cloud::Fox;
 use crate::models::forecast::ForecastValues;
-use crate::{retry, wrapper};
 use crate::charge::LastCharge;
 use crate::consumption::ConsumptionValues;
 use crate::models::nordpool_tariffs::TariffValues;
@@ -157,39 +151,6 @@ pub fn load_active_block(backup_dir: &str) -> Result<Option<Block>, BackupError>
     }
 
     Ok(None)
-}
-
-/// Gat and saves statistics from yesterday
-///
-/// # Arguments
-///
-/// * 'stats_dir' - the directory to save the file to
-/// * 'fox' - reference to the Fox struct
-pub fn save_yesterday_statistics(stats_dir: &str, fox: &Fox) -> Result<(), BackupError> {
-    let start = Local::now()
-        .add(Duration::days(-1))
-        .duration_trunc(TimeDelta::days(1))?
-        .with_timezone(&Utc);
-    let end =  start
-        .add(Duration::days(1))
-        .add(Duration::seconds(-1));
-    let device_history = retry!(||fox.get_device_history_data(start, end))?;
-
-    let file_path = format!("{}{}.csv", stats_dir, device_history.date.format("%Y%m%d"));
-
-    let x =device_history.pv_power
-        .iter()
-        .zip(device_history.ld_power.iter())
-        .zip(device_history.time.iter()).map(|((&p, &l), t)| (t.clone(), p, l))
-        .collect::<Vec<(String, f64, f64)>>();
-
-    let mut f = File::create(file_path)?;
-    write!(f, "time,pvPower,ldPower\n")?;
-    for l in x {
-        write!(f, "{},{},{}\n", l.0, l.1, l.2)?
-    }
-
-    Ok(())
 }
 
 /// Saves scheduled blocks to file

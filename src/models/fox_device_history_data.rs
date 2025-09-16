@@ -1,4 +1,3 @@
-use chrono::{NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde::de::Error;
 use serde_json::Value;
@@ -38,10 +37,6 @@ pub struct DeviceHistoryResult {
 
 #[derive(Debug)]
 pub struct DeviceHistory {
-    pub date: NaiveDate,
-    pub time: Vec<String>,
-    pub pv_power: Vec<f64>,
-    pub ld_power: Vec<f64>,
     pub soc: Vec<u8>,
 }
 

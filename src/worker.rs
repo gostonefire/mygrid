@@ -3,7 +3,7 @@ use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
 use log::info;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
-use crate::backup::{save_last_charge, save_active_block, save_yesterday_statistics, save_schedule};
+use crate::backup::{save_last_charge, save_active_block, save_schedule};
 use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, LastCharge};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
@@ -34,7 +34,6 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
         // Check inverter time and save some stats once every day, hour 15 is arbitrary
         if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != local_now.ordinal0())) && local_now.hour() >= 15 {
             check_inverter_local_time(&mgr.fox)?;
-            save_yesterday_statistics(&config.files.stats_dir, &mgr.fox)?;
             day_of_year = Some(local_now.ordinal0());
         }
 
@@ -47,7 +46,7 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
         // has been reached. Hence, we need to check every five minutes (Fox Cloud is updated
         // with that frequency) if we have a started and running charge block where max SoC
         // has been reached. If so, we disable force charge and set the inverter min soc
-        // on grid to max soc (i.e. we set it to Hold) and also set the block status to Full.
+        // on grid to max soc (i.e., we set it to Hold) and also set the block status to Full.
         if active_block.as_ref().is_some_and(|b| b.is_charge() && b.is_active(local_now)) {
 
             if local_now - charge_check_done > Duration::minutes(5) {
@@ -105,13 +104,13 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
 }
 
 /// Returns true if it is time to update the schedule.
-/// This can happen in two occasions:
+/// This can happen on two occasions:
 /// * When the active block is done (it has passed its end hour), or doesn't exist ar all
 /// * When the active block has been running for 4 hours (or more), and is not a charge block
 ///
-/// Reason for ending an active block prematurely is that PV power and consumption are estimates
-/// given SMHI forecasts on cloud and temperature predictions (which often are inaccurate), and
-/// the consumption can vary a lot depending on e.g. cooking and taking showers. Also, the base
+/// The reason for ending an active block prematurely is that PV power and consumption are estimates
+/// given SMHI forecasts on cloud and temperature predictions (which often are inaccurate). Also, 
+/// the consumption can vary a lot depending on e.g., cooking and taking showers. Also, the base
 /// consumption curve regarding heating is indeed a curve but in practise goes up and down
 /// rather unpredictable.
 ///
@@ -153,7 +152,7 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 /// * check so max soc is greater than current soc
 ///     * if not adjust min soc on grid according max soc end return status Full
 ///     * reason for setting it to max soc is so there is room for estimated PV power
-/// * set the max soc which reflects how much room is needed for PV in following blocks
+/// * set the max soc which reflects how much room is needed for PV in the following blocks
 /// * set the charge schedule
 ///
 /// # Arguments
@@ -186,7 +185,7 @@ fn set_charge(fox: &Fox, block: &Block) -> Result<Status, MyGridWorkerError> {
 ///
 /// This is similar to a hold block if the current soc is found to be equal or greater
 /// than the given max soc. If so, the charge schedule is disabled, the given max soc is
-/// used as new min soc on grid and finally the max soc is set to 100%
+/// used as a new min soc on grid, and finally the max soc is set to 100%
 ///
 /// # Arguments
 ///
@@ -270,7 +269,7 @@ fn get_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
     Ok(retry!(||fox.get_current_soc())?)
 }
 
-/// Logs a schedule, i.e. its blocks
+/// Logs a schedule, i.e., its blocks
 ///
 /// # Arguments
 ///
