@@ -482,7 +482,6 @@ fn group_on_time(data: [f64;1440], date_time: DateTime<Local>, group: u32) -> Ve
         .into_iter()
         .map(|(t, v)| {
             let dt = date_time.with_hour(t / 60u32).unwrap().with_minute(t % 60u32).unwrap();
-            dbg!(dt);
             ProductionValues { valid_time: dt, power: v.0 / v.1 }
         })
         .collect::<Vec<ProductionValues>>();
