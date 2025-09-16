@@ -51,15 +51,4 @@ where D: Deserializer<'de> {
         .map_err(|_| Error::custom("overflow"))?;
 
     Ok(x)
-
-    /*
-    let type_id = &deserializer.type_id();
-    if type_id == &TypeId::of::<f64>() {f64::deserialize(deserializer)}
-    else {
-        let s = String::deserialize(deserializer)?;
-        f64::from_str(s.as_str()).map_err(serde::de::Error::custom )
-    }
-*/
-    //let buf = String::deserialize(deserializer)?;
-    //f64::from_str(buf.as_str()).map_err(serde::de::Error::custom)
 }
