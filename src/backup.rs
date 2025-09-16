@@ -9,23 +9,23 @@ use glob::glob;
 use serde::Serialize;
 use crate::errors::BackupError;
 use crate::manager_fox_cloud::Fox;
-use crate::models::smhi_forecast::ForecastValues;
+use crate::models::forecast::ForecastValues;
 use crate::{retry, wrapper};
 use crate::charge::LastCharge;
 use crate::consumption::ConsumptionValues;
 use crate::models::nordpool_tariffs::TariffValues;
-use crate::production_legacy::ProductionValues;
+use crate::manager_production::ProductionValues;
 use crate::scheduling::{Block, Schedule};
 
 
 #[derive(Serialize)]
-pub struct BaseData {
+pub struct BaseData<'a> {
     date_time: DateTime<Local>,
-    forecast: Vec<ForecastValues>,
-    production: Vec<ProductionValues>,
-    production_kw: Vec<ProductionValues>,
-    consumption: Vec<ConsumptionValues>,
-    tariffs: Vec<TariffValues>,
+    forecast: &'a Vec<ForecastValues>,
+    production: &'a Vec<ProductionValues>,
+    production_kw: &'a Vec<ProductionValues>,
+    consumption: &'a Vec<ConsumptionValues>,
+    tariffs: &'a Vec<TariffValues>,
 }
 
 /// Saves base data used in the creation of a schedule if time is not in the future
@@ -45,17 +45,17 @@ pub fn save_base_data(
     production: &Vec<ProductionValues>,
     production_kw: &Vec<ProductionValues>,
     consumption: &Vec<ConsumptionValues>,
-    tariffs: Vec<TariffValues>) -> Result<(), BackupError> {
+    tariffs: &Vec<TariffValues>) -> Result<(), BackupError> {
 
     if Local::now().timestamp() >= date_time.timestamp() {
         let file_path = format!("{}{}_base_data.json", backup_dir, Utc::now().format("%Y%m%d%H%M%S"));
 
         let backup = BaseData {
             date_time,
-            forecast: forecast.clone(),
-            production: production.clone(),
-            production_kw: production_kw.clone(),
-            consumption: consumption.clone(),
+            forecast,
+            production,
+            production_kw,
+            consumption,
             tariffs,
         };
 
@@ -99,8 +99,8 @@ pub fn save_last_charge(backup_dir: &str, last_charge: &Option<LastCharge>) -> R
 }
 
 /// Loads data about the last charge made from grid to battery.
-/// If none is found or if the data is older than 23 hours then None is returned.
-/// 23 hours since getting device history data is limited to max 23 hours, 59minutes and 59 seconds.
+/// If none is found or if the data is older than 23 hours, then None is returned.
+/// 23 hours since getting device history data is limited to max 23 hours, 59 minutes and 59 seconds.
 /// By choosing 23 hours sharp gives some wiggle room and easier calculation later on.
 ///
 /// # Arguments
@@ -167,12 +167,12 @@ pub fn load_active_block(backup_dir: &str) -> Result<Option<Block>, BackupError>
 /// * 'fox' - reference to the Fox struct
 pub fn save_yesterday_statistics(stats_dir: &str, fox: &Fox) -> Result<(), BackupError> {
     let start = Local::now()
-        .add(chrono::Duration::days(-1))
+        .add(Duration::days(-1))
         .duration_trunc(TimeDelta::days(1))?
         .with_timezone(&Utc);
     let end =  start
-        .add(chrono::Duration::days(1))
-        .add(chrono::Duration::seconds(-1));
+        .add(Duration::days(1))
+        .add(Duration::seconds(-1));
     let device_history = retry!(||fox.get_device_history_data(start, end))?;
 
     let file_path = format!("{}{}.csv", stats_dir, device_history.date.format("%Y%m%d"));

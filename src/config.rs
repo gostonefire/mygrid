@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use log::LevelFilter;
 use serde::Deserialize;
 use crate::errors::ConfigError;
@@ -20,29 +19,23 @@ pub struct ConsumptionParameters {
 
 #[derive(Deserialize)]
 pub struct ProductionParameters {
-    pub min_pv_power: f64,
-    pub max_pv_power: f64,
+    pub panel_power: f64,
+    pub panel_slope: f64,
+    pub panel_east_azm: f64,
+    pub panel_temp_red: f64,
+    pub tau: f64,
+    pub tau_down: f64,
+    pub k_gain: f64,
+    pub iam_factor: f64,
+    pub start_azm: f64,
+    pub start_elv: f64,
+    pub stop_azm: f64,
+    pub stop_elv: f64,
     pub cloud_impact_factor: f64,
     pub low_clouds_factor: f64,
     pub mid_clouds_factor: f64,
     pub high_clouds_factor: f64,
-    pub summer_solstice: (u32, u32),
-    pub winter_solstice: (u32, u32),
-    pub sunrise_angle: f64,
-    pub sunset_angle: f64,
-    pub visibility_alt: f64,
-    pub am_x1: f64,
-    pub am_y1: f64,
-    pub am_x2: f64,
-    pub am_y2: f64,
-    pub pm_x1: f64,
-    pub pm_y1: f64,
-    pub pm_x2: f64,
-    pub pm_y2: f64,
-    #[serde(skip)]
-    pub diagram: Option<[f64;1440]>,
 }
-
 #[derive(Deserialize)]
 pub struct ChargeParameters {
     pub bat_capacity: f64,
@@ -61,6 +54,12 @@ pub struct FoxESS {
 }
 
 #[derive(Deserialize)]
+pub struct Forecast {
+    pub host: String,
+    pub port: u16,
+}
+
+#[derive(Deserialize)]
 pub struct MailParameters {
     pub smtp_user: String,
     pub smtp_password: String,
@@ -74,7 +73,6 @@ pub struct Files {
     pub backup_dir: String,
     pub stats_dir: String,
     pub manual_file: String,
-    pub pv_diagram: String,
     pub cons_diagram: String,
 }
 
@@ -93,14 +91,10 @@ pub struct Config {
     pub production: ProductionParameters,
     pub charge: ChargeParameters,
     pub fox_ess: FoxESS,
+    pub forecast: Forecast,   
     pub mail: MailParameters,
     pub files: Files,
     pub general: General,
-}
-
-#[derive(Deserialize)]
-struct PVDiagram {
-    pv_data: Vec<f64>,
 }
 
 #[derive(Deserialize)]
@@ -129,41 +123,10 @@ pub fn load_config(config_path: &str) -> Result<Config, ConfigError> {
     let toml = fs::read_to_string(config_path)?;
     let mut config: Config = toml::from_str(&toml)?;
     
-    let pv_diagram = load_pv_diagram(&config.files.pv_diagram)?;
     let cons_diagram = load_consumption_diagram(&config.files.cons_diagram)?;
-    
-    config.production.diagram = Some(pv_diagram);
     config.consumption.diagram = Some(cons_diagram);
     
     Ok(config)
-}
-
-/// Loads PV Diagram data
-///
-/// # Arguments
-///
-/// * 'diagram_path' - path to the pv diagram file
-fn load_pv_diagram(diagram_path: &str) -> Result<[f64;1440], ConfigError> {
-
-    let path = Path::new(&diagram_path);
-    if path.exists() {
-        let mut result: [f64;1440] = [0.0;1440];
-
-        let json = fs::read_to_string(path)?;
-        let pv_diagram: PVDiagram = serde_json::from_str(&json)?;
-
-        if pv_diagram.pv_data.len() != 1440 {
-            return Err(ConfigError::from("PV diagram length mismatch"))
-        }
-
-        for (i, p) in pv_diagram.pv_data.iter().enumerate() {
-            result[i] = *p;
-        }
-
-        Ok(result)
-    } else {
-        Err(ConfigError::from("PV diagram file not found"))
-    }
 }
 
 /// Loads consumption diagram configuration

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Datelike, Local, Timelike};
 use serde::Serialize;
 use crate::config::ConsumptionParameters;
-use crate::models::smhi_forecast::ForecastValues;
+use crate::models::forecast::ForecastValues;
 
 #[derive(Clone, Serialize)]
 pub struct ConsumptionValues {
@@ -9,9 +9,9 @@ pub struct ConsumptionValues {
     pub power: f64
 }
 
-/// Struct for calculating and holding Consumption load per hour given a whether forecast
+/// Struct for calculating and holding Consumption load per hour given a weather forecast
 ///
-/// The business logic is implemented in the calculate_consumption function. Current version is
+/// The business logic is implemented in the calculate_consumption function. The current version is
 /// just an inverse linear proportion between temperature and estimated load.
 pub struct Consumption {
     consumption: Vec<ConsumptionValues>,
@@ -65,9 +65,9 @@ impl Consumption {
     }
 
     /// Calculates consumption based on temperature over a multiplicative inverse (1/x) curve.
-    /// The curve is formed such that it gives an approximation for a house consumption between
+    /// The curve is formed such that it gives an approximation for house consumption between
     /// outside temperatures from -4 to 20. It is assumed that temperatures outside that range
-    /// doesn't change much on the consumption in the climate of southern Sweden.
+    /// don't change much on the consumption in the climate of southern Sweden.
     ///
     /// The factor is calculated such that the curve function is equal to 1 at X = -4 and 0 (zero)
     /// at X = 20.

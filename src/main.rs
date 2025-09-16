@@ -9,10 +9,7 @@ use crate::worker::run;
 
 mod manager_nordpool;
 mod manager_fox_cloud;
-mod manager_sun;
 mod models;
-mod manager_smhi;
-mod production_legacy;
 mod consumption;
 mod macros;
 mod initialization;
@@ -26,6 +23,8 @@ mod charge;
 mod config;
 mod spline;
 mod logging;
+mod manager_forecast;
+mod manager_production;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);

@@ -7,17 +7,17 @@ use crate::config::{load_config, Config};
 use crate::consumption::Consumption;
 use crate::errors::{MyGridInitError};
 use crate::logging::setup_logger;
+use crate::manager_forecast::Forecast;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
-use crate::manager_smhi::SMHI;
-use crate::production_legacy::PVProduction;
+use crate::manager_production::PVProduction;
 use crate::scheduling::{Block, Schedule};
 
 pub struct Mgr {
     pub fox: Fox,
     pub nordpool: NordPool,
-    pub smhi: SMHI,
+    pub forecast: Forecast,
     pub pv: PVProduction,
     pub cons: Consumption,
     pub mail: Mail,
@@ -59,8 +59,8 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
     let nordpool = NordPool::new();
-    let smhi = SMHI::new(&config);
-    let pv = PVProduction::new(&config.production, &config.geo_ref);
+    let smhi = Forecast::new(&config);
+    let pv = PVProduction::new(&config.production, config.geo_ref.lat, config.geo_ref.long);
     let cons = Consumption::new(&config.consumption);
     let mail = Mail::new(&config.mail)?;
     let schedule = Schedule::new(&config.charge);
@@ -68,7 +68,7 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     let mgr = Mgr {
         fox,
         nordpool,
-        smhi,
+        forecast: smhi,
         pv,
         cons,
         mail,

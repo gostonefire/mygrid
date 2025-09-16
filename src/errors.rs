@@ -3,10 +3,11 @@ use std::fmt::Formatter;
 use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
 use chrono::{Local, RoundingError};
 use chrono::format::ParseError;
+use crate::manager_forecast::errors::ForecastError;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
 use crate::manager_nordpool::errors::NordPoolError;
-use crate::manager_smhi::errors::SMHIError;
+use crate::manager_production::errors::ProdError;
 use crate::scheduling::Block;
 
 
@@ -205,8 +206,8 @@ impl From<NordPoolError> for SchedulingError {
         SchedulingError(e.to_string())
     }
 }
-impl From<SMHIError> for SchedulingError {
-    fn from(e: SMHIError) -> Self {
+impl From<ForecastError> for SchedulingError {
+    fn from(e: ForecastError) -> Self {
         SchedulingError(e.to_string())
     }
 }
@@ -215,7 +216,9 @@ impl From<BackupError> for SchedulingError {
         SchedulingError(e.to_string())
     }
 }
-
+impl From<ProdError> for SchedulingError {
+    fn from(e: ProdError) -> Self { SchedulingError(e.to_string()) }
+}
 
 /// Error depicting errors that occur while doing skip file operations
 ///

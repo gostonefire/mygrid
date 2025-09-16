@@ -4,7 +4,7 @@ use std::thread;
 use chrono::{DateTime, DurationRound, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 use crate::consumption::ConsumptionValues;
-use crate::production_legacy::ProductionValues;
+use crate::manager_production::ProductionValues;
 use std::collections::HashMap;
 use std::ops::Add;
 use crate::errors::SchedulingError;
@@ -832,12 +832,12 @@ fn combine_blocks(blocks_one: &Blocks, blocks_two: &Blocks) -> Blocks {
 /// * 'charge_tariff_in' - mean tariff for residual charge
 /// * 'backup_dir' - backup directory
 pub fn update_schedule(mgr: &mut Mgr, date_time: DateTime<Local>, charge_in: f64, charge_tariff_in: f64, backup_dir: &str) -> Result<(), SchedulingError> {
-    let forecast = retry!(||mgr.smhi.new_forecast(date_time))?;
-    let (production, production_kw) = mgr.pv.new_estimates(&forecast);
+    let forecast = retry!(||mgr.forecast.new_forecast(date_time))?;
+    let (production, production_kw) = mgr.pv.estimate(&forecast)?;
     let consumption = mgr.cons.new_estimates(&forecast);
     let tariffs = retry!(||mgr.nordpool.get_tariffs(date_time))?;
-    mgr.schedule.update_scheduling(&tariffs, production, consumption, charge_in, charge_tariff_in, date_time);
-    save_base_data(backup_dir, date_time, &forecast, production, production_kw, consumption, tariffs)?;
+    mgr.schedule.update_scheduling(&tariffs, &production, consumption, charge_in, charge_tariff_in, date_time);
+    save_base_data(backup_dir, date_time, &forecast, &production, &production_kw, consumption, &tariffs)?;
 
     Ok(())
 }
