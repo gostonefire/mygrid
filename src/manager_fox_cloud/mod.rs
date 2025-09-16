@@ -39,7 +39,7 @@ impl Fox {
         Self { api_key: config.api_key.to_string(), sn: config.inverter_sn.to_string(), agent }
     }
 
-    /// Obtain the battery current soc (state of charge)
+    /// Get the battery current soc (state of charge)
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20real-time20data0a3ca20id3dget20device20real-time20data4303e203ca3e
     ///
@@ -64,7 +64,7 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'soc' - the new min soc on grid value (10 - 100)
+    /// * 'soc' - the new min soc on grid value (10-100)
     pub fn set_min_soc_on_grid(&self, soc: u8) -> Result<(), FoxError> {
         let path = "/op/v0/device/setting/set";
 
@@ -82,7 +82,7 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'soc' - the new min soc on grid value (10 - 100)
+    /// * 'soc' - the new min soc on grid value (10-100)
     pub fn set_max_soc(&self, soc: u8) -> Result<(), FoxError> {
         let path = "/op/v0/device/setting/set";
 
@@ -94,7 +94,7 @@ impl Fox {
         Ok(())
     }
 
-    /// Obtain history data from the inverter
+    /// Collect history data from the inverter
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20history20data0a3ca20id3dget20device20history20data4303e203ca3e
     ///
@@ -169,7 +169,7 @@ impl Fox {
         )
     }
 
-    /// Obtain the inverter local time
+    /// Get the inverter local time
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
     ///
@@ -194,7 +194,7 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'date_time' - date and time as a DateTime<Local>, i.e. OS local time
+    /// * 'date_time' - date and time as a DateTime<Local>, i.e., OS local time
     pub fn set_device_time(&self, date_time: NaiveDateTime) -> Result<(), FoxError> {
         let path = "/op/v0/device/time/set";
 
@@ -215,13 +215,13 @@ impl Fox {
     }
 
     /// Builds a request and sends it as a POST.
-    /// The return is the json representation of the result as specified by
-    /// respective FoxESS API
+    /// The return is the JSON representation of the result as specified by
+    ///  the respective FoxESS API
     ///
     /// # Arguments
     ///
     /// * path - the API path excluding the domain
-    /// * body - a string containing the payload in json format
+    /// * body - a string containing the payload in JSON format
     fn post_request(&self, path: &str, body: String) -> Result<String, FoxError> {
         let url = format!("{}{}", REQUEST_DOMAIN, path);
 
@@ -242,7 +242,7 @@ impl Fox {
         Ok(json)
     }
 
-    /// Generates http headers required by Fox Open API, this includes also building a
+    /// Generates http headers required by Fox Open API; this includes also building a
     /// md5 hashed signature.
     ///
     /// # Arguments
@@ -273,13 +273,13 @@ impl Fox {
 
     /// Builds a charge time schedule after first checking for inconsistencies.
     /// Inconsistencies are any of:
-    /// * wrong time, e.g. hour outside 0-23 or minute outside 0-59
+    /// * wrong time, e.g., hour outside 0-23 or minute outside 0-59
     /// * start time after end time
     /// * overlapping between schedule 1 and 2 (times are inclusive in both ends)
     ///
     /// It does correct minor errors:
     /// * a schedule not enabled is automatically set to zero start and end time
-    /// * a schedule that are enabled but with same start and end time is disabled and zeroed
+    /// * a schedule which is enabled but with the same start and end time is disabled and zeroed
     ///
     /// # Arguments
     ///
@@ -362,8 +362,8 @@ impl Fox {
     }
 
     /// Converts a DeviceTime struct to the NaiveDateTime format.
-    /// Reason for going through NaiveDateTime is that the inverter is timezone unaware,
-    /// hence when passing between summer- and winter time there may be a gap where an hour
+    /// The reason for going through NaiveDateTime is that the inverter is timezone unaware,
+    /// hence when passing between summer and winter time, there may be a gap where an hour
     /// might hit a gap or a fold in time with time zone awareness.
     ///
     /// # Arguments
