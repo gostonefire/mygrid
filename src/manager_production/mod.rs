@@ -124,7 +124,7 @@ impl PVProduction {
             let shadow_down = exp_decrease(minute_of_day, down, sp.sunset, 4);
 
             // Calculate the cloud factor for the given minute of the day
-            let cloud_factor = cloud_factor[minute_of_day] * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor);
+            let cloud_factor = cloud_factor[minute_of_day].clamp(0.0, 1.0) * self.cloud_impact_factor + (1.0 - self.cloud_impact_factor);
 
             // Record the estimated power at the given point in time
             power[minute_of_day] = pwr * ame_red * shadow_up * shadow_down * cloud_factor;
