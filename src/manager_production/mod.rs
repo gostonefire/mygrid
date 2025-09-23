@@ -30,10 +30,8 @@ pub struct PVProduction {
     tau_down: f64,
     k_gain: f64,
     iam_factor: f64,
-    start_azm: f64,
-    start_elv: f64,
-    stop_azm: f64,
-    stop_elv: f64,
+    start_azm_elv: [[f64;2];5],
+    stop_azm_elv: [[f64;2];5],
     cloud_impact_factor: f64,
 }
 
@@ -52,10 +50,8 @@ impl PVProduction {
             tau_down: params.tau_down,
             k_gain: params.k_gain,
             iam_factor: params.iam_factor,
-            start_azm: params.start_azm,
-            start_elv: params.start_elv,
-            stop_azm: params.stop_azm,
-            stop_elv: params.stop_elv,
+            start_azm_elv: params.start_azm_elv,
+            stop_azm_elv: params.stop_azm_elv,
             cloud_impact_factor: params.cloud_impact_factor,
         }
     }
@@ -205,13 +201,41 @@ impl PVProduction {
         let mut up: usize = 0;
         let mut down: usize = 0;
 
-        for m in solar_positions.sunrise..solar_positions.sunset {
-            if up == 0 && (solar_positions.elevation[m] > self.start_elv || solar_positions.azimuth[m] > self.start_azm) {
-                up = m;
-            }
-            if down == 0 && solar_positions.azimuth[m] > 180.0 && (solar_positions.elevation[m] < self.stop_elv || solar_positions.azimuth[m] > self.stop_azm) {
-                down = m;
+        let mut up_pairs: Vec<(f64,f64,f64)> = Vec::new();
+        let obst_len = self.start_azm_elv.len();
+        for i in 0..obst_len {
+            if i < obst_len - 1 && self.start_azm_elv[i+1][0] >= 0.0 {
+                up_pairs.push((self.start_azm_elv[i][0], self.start_azm_elv[i+1][0], self.start_azm_elv[i][1]));
+            } else {
+                up_pairs.push((self.start_azm_elv[i][0], 180.0, self.start_azm_elv[i][1]));
                 break;
+            }
+        }
+
+        let mut down_pairs: Vec<(f64,f64,f64)> = Vec::new();
+        let obst_len = self.stop_azm_elv.len();
+        for i in 0..obst_len {
+            if i < obst_len - 1 && self.stop_azm_elv[i+1][0] >= 0.0 {
+                down_pairs.push((self.stop_azm_elv[i][0], self.stop_azm_elv[i+1][0], self.stop_azm_elv[i][1]));
+            } else {
+                down_pairs.push((self.stop_azm_elv[i][0], 360.0, self.stop_azm_elv[i][1]));
+                break;
+            }
+        }
+
+        for m in solar_positions.sunrise..solar_positions.sunset {
+            if solar_positions.azimuth[m] < 180.0 {
+                for up_obst in up_pairs.iter() {
+                    if up == 0 && solar_positions.azimuth[m] >= up_obst.0 && solar_positions.azimuth[m] < up_obst.1 && solar_positions.elevation[m] > up_obst.2 {
+                        up = m;
+                    }
+                }
+            } else {
+                for down_obst in down_pairs.iter() {
+                    if down == 0 && solar_positions.azimuth[m] >= down_obst.0 && solar_positions.azimuth[m] < down_obst.1 && solar_positions.elevation[m] < down_obst.2 {
+                        down = m;
+                    }
+                }
             }
         }
 
