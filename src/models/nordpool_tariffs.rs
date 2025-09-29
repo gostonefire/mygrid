@@ -18,7 +18,7 @@ pub struct MultiAreaEntries {
 
 #[derive(Deserialize, Debug)]
 pub struct Tariffs {
-    #[serde(rename = "multiAreaEntries")]
+    #[serde(rename = "multiIndexEntries")]
     pub multi_area_entries: Vec<MultiAreaEntries>,
 }
 

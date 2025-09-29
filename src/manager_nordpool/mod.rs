@@ -46,13 +46,14 @@ impl NordPool {
     ///
     /// * 'date_time' - the date to retrieve prices for
     fn get_day_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<TariffValues>, NordPoolError> {
-        let url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices";
+        let url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPriceIndices";
         let date = format!("{}", date_time.format("%Y-%m-%d"));
         let query = vec![
             ("date", date.as_str()),
             ("market", "DayAhead"),
-            ("deliveryArea", "SE4"),
+            ("indexNames", "SE4"),
             ("currency", "SEK"),
+            ("resolutionInMinutes", "60")
         ];
 
         let mut response = self.agent
