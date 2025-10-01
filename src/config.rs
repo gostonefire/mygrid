@@ -13,6 +13,7 @@ pub struct GeoRef {
 pub struct ConsumptionParameters {
     pub min_avg_load: f64,
     pub max_avg_load: f64,
+    pub curve: Vec<(f64, f64)>,
     #[serde(skip)]
     pub diagram: Option<[[f64;24];7]>,
 }

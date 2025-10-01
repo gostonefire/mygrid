@@ -29,8 +29,10 @@ impl Consumption {
     ///
     /// * 'config' - configuration struct
     pub fn new(config: &ConsumptionParameters) -> Consumption {
-        let curve_x = vec![-4.0, -2.0, 0.0, 6.0, 18.0];
-        let curve_y = vec![1.0, 0.5, 0.4, 0.25, 0.0];
+        let (curve_x, curve_y): (Vec<f64>, Vec<f64>) = config.curve
+            .iter()
+            .map(|c| (c.0, c.1))
+            .unzip();
 
         Consumption { 
             consumption: Vec::new(),
