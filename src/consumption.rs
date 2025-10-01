@@ -2,6 +2,7 @@ use chrono::{DateTime, Datelike, Local, Timelike};
 use serde::Serialize;
 use crate::config::ConsumptionParameters;
 use crate::models::forecast::ForecastValues;
+use crate::spline::MonotonicCubicSpline;
 
 #[derive(Clone, Serialize)]
 pub struct ConsumptionValues {
@@ -18,6 +19,7 @@ pub struct Consumption {
     min_avg_load: f64,
     max_avg_load: f64,
     diagram: [[f64;24];7],
+    curve: MonotonicCubicSpline,
 }
 
 impl Consumption {
@@ -27,11 +29,16 @@ impl Consumption {
     ///
     /// * 'config' - configuration struct
     pub fn new(config: &ConsumptionParameters) -> Consumption {
+        let curve_x = vec![-4.0, -2.0, 0.0, 6.0, 18.0];
+        let curve_y = vec![1.0, 0.5, 0.4, 0.25, 0.0];
+
         Consumption { 
             consumption: Vec::new(),
             min_avg_load: config.min_avg_load,
             max_avg_load: config.max_avg_load,
             diagram: config.diagram.unwrap(),
+            curve: MonotonicCubicSpline::new(&curve_x, &curve_y)
+                .expect("Failed to create consumption curve"),
         }
     }
     
@@ -64,13 +71,13 @@ impl Consumption {
         self.consumption = hour_load;
     }
 
-    /// Calculates consumption based on temperature over a multiplicative inverse (1/x) curve.
+    /// Calculates consumption based on temperature over an estimated curve.
     /// The curve is formed such that it gives an approximation for house consumption between
-    /// outside temperatures from -4 to 20. It is assumed that temperatures outside that range
+    /// outside temperatures from -4 to 18. It is assumed that temperatures outside that range
     /// don't change much on the consumption in the climate of southern Sweden.
     ///
     /// The factor is calculated such that the curve function is equal to 1 at X = -4 and 0 (zero)
-    /// at X = 20.
+    /// at X = 18.
     ///
     /// Output thus varies between MAX_AVG_LOAD and MIN_AVG_LOAD
     ///
@@ -78,9 +85,9 @@ impl Consumption {
     ///
     /// * 'temp' - outside temperature
     fn consumption_curve(&self, temp: f64) -> f64 {
-        let capped_temp = temp.max(-4.0).min(20.0);
-        let factor = 8.0 * 3.0f64.sqrt() - 8.0;
-        let curve = 2.0 / (capped_temp + factor) - 2.0 / ( 20.0 + factor);
+        let capped_temp = temp.max(-4.0).min(18.0);
+        let curve = self.curve.interpolate(capped_temp).clamp(0.0, 1.0);
+
 
         curve * (self.max_avg_load - self.min_avg_load) + self.min_avg_load
     }
