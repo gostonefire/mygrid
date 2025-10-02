@@ -30,8 +30,8 @@ pub struct PVProduction {
     tau_down: f64,
     k_gain: f64,
     iam_factor: f64,
-    start_azm_elv: [[f64;2];5],
-    stop_azm_elv: [[f64;2];5],
+    start_azm_elv: Vec<(f64, f64)>,
+    stop_azm_elv: Vec<(f64, f64)>,
     cloud_impact_factor: f64,
 }
 
@@ -50,8 +50,8 @@ impl PVProduction {
             tau_down: params.tau_down,
             k_gain: params.k_gain,
             iam_factor: params.iam_factor,
-            start_azm_elv: params.start_azm_elv,
-            stop_azm_elv: params.stop_azm_elv,
+            start_azm_elv: params.start_azm_elv.clone(),
+            stop_azm_elv: params.stop_azm_elv.clone(),
             cloud_impact_factor: params.cloud_impact_factor,
         }
     }
@@ -204,10 +204,10 @@ impl PVProduction {
         let mut up_pairs: Vec<(f64,f64,f64)> = Vec::new();
         let obst_len = self.start_azm_elv.len();
         for i in 0..obst_len {
-            if i < obst_len - 1 && self.start_azm_elv[i+1][0] >= 0.0 {
-                up_pairs.push((self.start_azm_elv[i][0], self.start_azm_elv[i+1][0], self.start_azm_elv[i][1]));
+            if i < obst_len - 1 {
+                up_pairs.push((self.start_azm_elv[i].0, self.start_azm_elv[i+1].0, self.start_azm_elv[i].1));
             } else {
-                up_pairs.push((self.start_azm_elv[i][0], 180.0, self.start_azm_elv[i][1]));
+                up_pairs.push((self.start_azm_elv[i].0, 180.0, self.start_azm_elv[i].1));
                 break;
             }
         }
@@ -215,10 +215,10 @@ impl PVProduction {
         let mut down_pairs: Vec<(f64,f64,f64)> = Vec::new();
         let obst_len = self.stop_azm_elv.len();
         for i in 0..obst_len {
-            if i < obst_len - 1 && self.stop_azm_elv[i+1][0] >= 0.0 {
-                down_pairs.push((self.stop_azm_elv[i][0], self.stop_azm_elv[i+1][0], self.stop_azm_elv[i][1]));
+            if i < obst_len - 1 {
+                down_pairs.push((self.stop_azm_elv[i].0, self.stop_azm_elv[i+1].0, self.stop_azm_elv[i].1));
             } else {
-                down_pairs.push((self.stop_azm_elv[i][0], 360.0, self.stop_azm_elv[i][1]));
+                down_pairs.push((self.stop_azm_elv[i].0, 360.0, self.stop_azm_elv[i].1));
                 break;
             }
         }
