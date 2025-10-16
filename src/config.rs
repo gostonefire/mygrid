@@ -37,13 +37,11 @@ pub struct ProductionParameters {
 }
 #[derive(Deserialize)]
 pub struct ChargeParameters {
-    pub bat_capacity: f64,
     pub bat_kwh: f64,
     pub soc_kwh: f64,
     pub charge_kwh_hour: f64,
     pub charge_efficiency: f64,
     pub discharge_efficiency: f64,
-    pub sell_priority: f64,
 }
 
 #[derive(Deserialize)]

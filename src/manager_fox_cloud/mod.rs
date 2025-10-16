@@ -2,7 +2,7 @@ pub mod errors;
 
 use std::str::FromStr;
 use std::time::Duration;
-use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use ureq::Agent;
@@ -10,7 +10,6 @@ use ureq::http::{HeaderMap, HeaderName, HeaderValue};
 use crate::config::FoxESS;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
-use crate::models::fox_device_history_data::{DeviceHistory, DeviceHistoryData, DeviceHistoryResult, RequestDeviceHistoryData};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
 use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
@@ -92,36 +91,6 @@ impl Fox {
         let _ = self.post_request(&path, req_json)?;
 
         Ok(())
-    }
-
-    /// Collect history data from the inverter
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20history20data0a3ca20id3dget20device20history20data4303e203ca3e
-    ///
-    /// # Arguments
-    ///
-    /// * 'start' - the start time of the report
-    /// * 'end' - the end time of the report
-    pub fn get_device_history_data(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<DeviceHistory, FoxError> {
-        let path = "/op/v0/device/history/query";
-
-        let req = RequestDeviceHistoryData {
-            sn: self.sn.clone(),
-            variables: ["SoC"]
-                .iter().map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            begin: start.timestamp_millis(),
-            end: end.timestamp_millis(),
-        };
-        
-        let req_json = serde_json::to_string(&req)?;
-
-        let json = self.post_request(&path, req_json)?;
-
-        let fox_data: DeviceHistoryResult = serde_json::from_str(&json)?;
-        let device_history = transform_history_data(fox_data.result)?;
-
-        Ok(device_history)
     }
 
     /// Set the battery charging time schedule.
@@ -383,27 +352,6 @@ impl Fox {
 
         Ok(naive_device_time)
     }
-}
-
-/// Transforms device history data
-///
-/// # Arguments
-///
-/// * 'input' - the data to transform
-fn transform_history_data(input: Vec<DeviceHistoryData>) -> Result<DeviceHistory, FoxError> {
-    let mut soc: Vec<u8> = Vec::new();
-
-    for set in &input[0].data_set {
-        if set.variable == "SoC" {
-            for data in &set.data {
-                soc.push(data.value as u8);
-            }
-        }
-    }
-
-    Ok(DeviceHistory {
-        soc,
-    })
 }
 
 #[derive(Serialize, Deserialize)]

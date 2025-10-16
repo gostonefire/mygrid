@@ -8,7 +8,7 @@ use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
 use crate::manager_nordpool::errors::NordPoolError;
 use crate::manager_production::errors::ProdError;
-use crate::scheduling::Block;
+use crate::scheduler::Block;
 
 
 /// Error depicting errors that occur during initialization of the main program
@@ -104,7 +104,9 @@ impl From<PoisonError<RwLockReadGuard<'_, bool>>> for MyGridWorkerError {
 impl From<SkipError> for MyGridWorkerError {
     fn from(e: SkipError) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
 }
-
+impl From<&str> for MyGridWorkerError {
+    fn from(e: &str) -> Self { MyGridWorkerError { msg: e.to_string(), block: None }}
+}
 
 
 /// Error depicting errors that occur while doing backup operations

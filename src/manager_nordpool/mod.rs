@@ -1,6 +1,5 @@
 pub mod errors;
 
-use std::ops::Add;
 use std::time::Duration;
 use chrono::{DateTime, DurationRound, Local, TimeDelta};
 use ureq::Agent;
@@ -25,17 +24,12 @@ impl NordPool {
 
     /// Retrieves day ahead prices from NordPool
     /// It gets the tariffs for the day indicated by date_time (if it can't an error will be returned),
-    /// then it tries to get also next days tariffs and if successful those 24 tariffs are added
-    /// also added to the result.
     ///
     /// # Arguments
     ///
     /// * 'date_time' - the date to retrieve prices for
     pub fn get_tariffs(&self, date_time: DateTime<Local>) -> Result<Vec<TariffValues>, NordPoolError> {
-        let mut result = self.get_day_tariffs(date_time)?;
-        if let Ok(next_day) = self.get_day_tariffs(date_time.add(TimeDelta::days(1))) {
-            result.extend(next_day);
-        }
+        let result = self.get_day_tariffs(date_time)?;
 
         Ok(result)
     }

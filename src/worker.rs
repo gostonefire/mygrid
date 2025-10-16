@@ -1,22 +1,22 @@
 use std::thread;
-use chrono::{DateTime, Datelike, Local, Timelike, Duration, TimeDelta};
+use chrono::{DateTime, Datelike, Local, Timelike, Duration};
 use log::info;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
-use crate::backup::{save_last_charge, save_active_block, save_schedule};
-use crate::charge::{get_last_charge, update_last_charge, updated_charge_data, LastCharge};
+use crate::backup::save_schedule_blocks;
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
-use crate::scheduling::{update_schedule, Block, BlockType, Schedule, Status};
+use crate::scheduler::{update_schedule, Block, BlockType, Schedule, Status};
 use crate::manual::check_manual;
 
-pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, mut active_block: Option<Block>)
+pub fn run(config: Config, mgr: &mut Mgr)
            -> Result<(), MyGridWorkerError> {
 
     let mut charge_check_done: DateTime<Local> = DateTime::default();
     let mut local_now: DateTime<Local>;
     let mut day_of_year: Option<u32> = None;
+    let mut active_block: Option<usize> = None;
 
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
@@ -31,15 +31,10 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
             }
         }
 
-        // Check inverter time and save some stats once every day, hour 15 is arbitrary
+        // Check inverter time
         if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != local_now.ordinal0())) && local_now.hour() >= 15 {
             check_inverter_local_time(&mgr.fox)?;
             day_of_year = Some(local_now.ordinal0());
-        }
-
-        // Reset last_charge if it is older than 23 hours
-        if last_charge.as_ref().is_some_and(|b| local_now - b.date_time_end > TimeDelta::hours(23)) {
-            last_charge = None;
         }
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
@@ -47,84 +42,57 @@ pub fn run(config: Config, mgr: &mut Mgr, mut last_charge: Option<LastCharge>, m
         // with that frequency) if we have a started and running charge block where max SoC
         // has been reached. If so, we disable force charge and set the inverter min soc
         // on grid to max soc (i.e., we set it to Hold) and also set the block status to Full.
-        if active_block.as_ref().is_some_and(|b| b.is_charge() && b.is_active(local_now)) {
-
-            if local_now - charge_check_done > Duration::minutes(5) {
-                let mut block = active_block.unwrap();
-                if let Some(status) = set_full_if_done(&mgr.fox, block.soc_out)? {
-                    mgr.schedule.update_block(&mut block, status);
-                    last_charge = Some(get_last_charge(&block, local_now));
-
-                    save_last_charge(&config.files.backup_dir, &last_charge)?;
-                    save_active_block(&config.files.backup_dir, &block)?;
+        if let Some(block_id) = active_block {
+            if mgr.schedule.is_active_charging(block_id, local_now)
+            {
+                let block: &mut Block = mgr.schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
+                if local_now - charge_check_done > Duration::minutes(5) {
+                    if let Some(status) = set_full_if_done(&mgr.fox, block.soc_out)? {
+                        block.update_block_status(status);
+                    }
+                    charge_check_done = local_now;
                 }
-                active_block = Some(block);
-                charge_check_done = local_now;
             }
         }
 
-        // This is the main mode selector given a new schedule after every finished block
-        if is_update_time(&active_block, local_now) {
-            last_charge = update_last_charge(&mgr.schedule, &config.files.backup_dir, &mut active_block, last_charge, get_soc(&mgr.fox)?, local_now)?;
-            let (charge_in, charge_tariff_in) = updated_charge_data(&mgr.fox, &active_block, &last_charge, config.charge.soc_kwh)?;
+        // This is the main mode selector
+        if active_block.is_none_or(|b| mgr.schedule.is_update_time(b, local_now))  {
 
-            update_schedule(mgr, local_now, charge_in, charge_tariff_in, &config.files.backup_dir)?;
-            
-            let mut block = mgr.schedule.get_block(local_now)?;
+            let block_id = if let Some(block_id) = mgr.schedule.get_block_by_time(local_now) {
+                block_id
+            } else {
+                update_schedule(mgr, local_now, &config.files.backup_dir)?;
+                mgr.schedule.get_block_by_time(local_now).ok_or("New schedule is empty for current time")?
+            };
+
+            let block: &mut Block = mgr.schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
 
             let status: Status;
             match block.block_type {
                 BlockType::Charge => {
-                    status = set_charge(&mgr.fox, &block).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), &block)
+                    status = set_charge(&mgr.fox, block).map_err(|e| {
+                        MyGridWorkerError::new(e.to_string(), block)
                     })?;
                 },
 
                 BlockType::Hold => {
                     status = set_hold(&mgr.fox, block.soc_in as u8).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), &block)
+                        MyGridWorkerError::new(e.to_string(), block)
                     })?;
                 },
 
                 BlockType::Use => {
                     status = set_use(&mgr.fox).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), &block)
+                        MyGridWorkerError::new(e.to_string(), block)
                     })?;
                 },
             }
-            mgr.schedule.update_block_status(local_now, status.clone());
-            mgr.schedule.update_block(&mut block, status);
-            save_active_block(&config.files.backup_dir, &block)?;
-            save_schedule(&config.files.backup_dir, &mgr.schedule)?;
-            active_block = Some(block);
+            block.update_block_status(status.clone());
 
+            save_schedule_blocks(&config.files.backup_dir, &mgr.schedule.blocks)?;
             log_schedule(&mgr.schedule);
+            active_block = Some(block_id);
         }
-    }
-}
-
-/// Returns true if it is time to update the schedule.
-/// This can happen on two occasions:
-/// * When the active block is done (it has passed its end hour), or doesn't exist ar all
-/// * When the active block has been running for 4 hours (or more), and is not a charge block
-///
-/// The reason for ending an active block prematurely is that PV power and consumption are estimates
-/// given SMHI forecasts on cloud and temperature predictions (which often are inaccurate). Also, 
-/// the consumption can vary a lot depending on e.g., cooking and taking showers. Also, the base
-/// consumption curve regarding heating is indeed a curve but in practise goes up and down
-/// rather unpredictable.
-///
-/// # Arguments
-///
-/// * 'active_block' - the block being currently active
-/// * 'date_time'- the current date and time
-fn is_update_time(active_block: &Option<Block>, date_time: DateTime<Local>) -> bool {
-    if !active_block.as_ref().is_some_and(|b| b.is_active(date_time)) {
-        true
-    } else if active_block.as_ref().is_some_and(|b| { !b.is_charge() && b.get_age(date_time) >= 4 }) {
-        true
-    } else {
-        false
     }
 }
 
@@ -258,15 +226,6 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     let _ = retry!(||fox.set_max_soc(100))?;
 
     Ok(Status::Started)
-}
-
-/// Retrieves current soc from inverter
-/// 
-/// # Arguments
-/// 
-/// * 'fox' - reference to the Fox struct
-fn get_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
-    Ok(retry!(||fox.get_current_soc())?)
 }
 
 /// Logs a schedule, i.e., its blocks

@@ -1,8 +1,8 @@
 use std::env;
+use chrono::Local;
 use log::info;
 use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
-use crate::backup::{load_last_charge, load_active_block};
-use crate::charge::LastCharge;
+use crate::backup::load_schedule_blocks;
 use crate::config::{load_config, Config};
 use crate::consumption::Consumption;
 use crate::errors::{MyGridInitError};
@@ -12,7 +12,7 @@ use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::manager_nordpool::NordPool;
 use crate::manager_production::PVProduction;
-use crate::scheduling::{Block, Schedule};
+use crate::scheduler::Schedule;
 
 pub struct Mgr {
     pub fox: Fox,
@@ -27,7 +27,7 @@ pub struct Mgr {
 /// Initializes and returns configuration, a Mgr struct holding various of initialized structs, 
 /// an optional LastCharge struct, and an optional active block
 ///
-pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGridInitError> {
+pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     let args: Vec<String> = env::args().collect();
     let config_path = args.iter()
         .find(|p| p.starts_with("--config="))
@@ -56,6 +56,9 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
         info!("running in Debug Mode!!");
     }
     
+    // Load any existing schedule blocks
+    let schedule_blocks = load_schedule_blocks(&config.files.backup_dir, Local::now())?;
+    
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
     let nordpool = NordPool::new();
@@ -63,7 +66,7 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
     let pv = PVProduction::new(&config.production, config.geo_ref.lat, config.geo_ref.long);
     let cons = Consumption::new(&config.consumption);
     let mail = Mail::new(&config.mail)?;
-    let schedule = Schedule::new(&config.charge);
+    let schedule = Schedule::new(&config.charge, schedule_blocks);
 
     let mgr = Mgr {
         fox,
@@ -75,8 +78,5 @@ pub fn init() -> Result<(Config, Mgr, Option<LastCharge>, Option<Block>), MyGrid
         schedule,
     };
  
-    let last_charge = load_last_charge(&config.files.backup_dir)?;
-    let active_block = load_active_block(&config.files.backup_dir)?;
-
-    Ok((config, mgr, last_charge, active_block))
+    Ok((config, mgr))
 }

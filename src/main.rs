@@ -18,13 +18,12 @@ mod errors;
 mod backup;
 mod manager_mail;
 mod manual;
-mod scheduling;
-mod charge;
 mod config;
 mod spline;
 mod logging;
 mod manager_forecast;
 mod manager_production;
+mod scheduler;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
@@ -39,15 +38,15 @@ fn main() {
     let mut last_error = Local::now();
 
     loop {
-        let (config, mut mgr, last_charge, active_block) = match init() {
-            Ok((c, m, l, a)) => (c, m, l, a),
+        let (config, mut mgr) = match init() {
+            Ok((c, m)) => (c, m),
             Err(e) => {
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
                 continue;
             }
         };
 
-        match run(config, &mut mgr, last_charge, active_block) {
+        match run(config, &mut mgr) {
             Ok(()) => return,
             Err(e) => {
                 error!("{}", e);
