@@ -14,9 +14,9 @@ pub fn run(config: Config, mgr: &mut Mgr)
            -> Result<(), MyGridWorkerError> {
 
     let mut charge_check_done: DateTime<Local> = DateTime::default();
-    let mut local_now: DateTime<Local>;
+    let mut local_now: DateTime<Local> = Local::now();
     let mut day_of_year: Option<u32> = None;
-    let mut active_block: Option<usize> = None;
+    let mut active_block: Option<usize> = mgr.schedule.get_block_by_time(local_now);
 
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
