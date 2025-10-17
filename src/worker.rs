@@ -62,6 +62,7 @@ pub fn run(config: Config, mgr: &mut Mgr)
                 block_id
             } else {
                 update_schedule(mgr, local_now, &config.files.backup_dir)?;
+                log_schedule(&mgr.schedule);
                 mgr.schedule.get_block_by_time(local_now).ok_or("New schedule is empty for current time")?
             };
 
@@ -90,7 +91,6 @@ pub fn run(config: Config, mgr: &mut Mgr)
             block.update_block_status(status.clone());
 
             save_schedule_blocks(&config.files.backup_dir, &mgr.schedule.blocks)?;
-            log_schedule(&mgr.schedule);
             active_block = Some(block_id);
         }
     }

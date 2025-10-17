@@ -215,7 +215,7 @@ impl Schedule {
         let date_hour = date_time.duration_trunc(TimeDelta::hours(1)).unwrap();
         let block = self.blocks.iter().find(|b| b.block_id == block_id);
 
-        block.is_none_or(|b| b.start_time > date_hour && b.end_time < date_hour ||
+        block.is_none_or(|b| (b.start_time > date_hour || b.end_time < date_hour) ||
             (b.start_time <= date_hour && b.end_time >= date_hour && b.status == Status::Waiting))
     }
 
