@@ -42,7 +42,6 @@ impl fmt::Display for BlockType {
 pub enum Status {
     Waiting,
     Started,
-    Missed,
     Full(usize),
     Error,
 }
@@ -53,7 +52,6 @@ impl fmt::Display for Status {
         match self {
             Status::Waiting => write!(f, "Waiting  "),
             Status::Started => write!(f, "Started  "),
-            Status::Missed  => write!(f, "Missed   "),
             Status::Full(soc) => write!(f, "Full: {:>3}", soc),
             Status::Error   => write!(f, "Error    "),
         }
