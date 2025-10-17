@@ -49,6 +49,7 @@ pub fn run(config: Config, mgr: &mut Mgr)
                 if local_now - charge_check_done > Duration::minutes(5) {
                     if let Some(status) = set_full_if_done(&mgr.fox, block.soc_out)? {
                         block.update_block_status(status);
+                        save_schedule_blocks(&config.files.backup_dir, &mgr.schedule.blocks)?;
                     }
                     charge_check_done = local_now;
                 }

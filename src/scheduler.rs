@@ -12,14 +12,13 @@ use crate::manager_production::ProductionValues;
 use crate::models::nordpool_tariffs::TariffValues;
 use crate::{retry, wrapper};
 
-#[derive(Clone, Debug)]
 pub struct Tariffs {
     pub buy: [f64;24],
     pub length: usize,
 }
 
 /// Available block types
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum BlockType {
     Charge,
     Hold,
@@ -38,7 +37,7 @@ impl fmt::Display for BlockType {
 }
 
 /// Block status
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum Status {
     Waiting,
     Started,
@@ -58,7 +57,7 @@ impl fmt::Display for Status {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
     block_id: usize,
     pub block_type: BlockType,
@@ -108,7 +107,7 @@ impl Block {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct BlockInternal {
     block_type: BlockType,
     start_hour: usize,
@@ -126,7 +125,6 @@ struct BlockCollection {
     total_cost: f64,
 }
 
-#[derive(Debug)]
 struct PeriodMetrics {
     block_type: BlockType,
     start: usize,
@@ -271,7 +269,6 @@ impl Schedule {
         let block_collection = self.seek_best(charge_in);
         self.blocks = create_result_blocks(block_collection.blocks, self.soc_kwh, date_time, date_hour.hour() as usize);
         self.total_cost = block_collection.total_cost;
-        println!("{:?}", self.blocks);
     }
 
     /// Seeks the best schedule given input parameters.
