@@ -330,7 +330,7 @@ impl Schedule {
         BlockCollection {
             next_start: self.tariffs.length,
             next_charge_in: block.charge_out,
-            total_cost: block.cost,
+            total_cost: (block.cost * 100.0).round() / 100.0,
             blocks: vec![block],
         }
     }
@@ -405,7 +405,7 @@ impl Schedule {
             .map(|(i, t)| instance_charge[i] * t)
             .sum::<f64>();
 
-        ((c_price * 100.0).round() / 100.0, end)
+        (c_price, end)
     }
 
     /// Creates a charge block
@@ -508,7 +508,6 @@ impl Schedule {
                 .for_each(|(i, &np)| self.add_net_prod(i + start, np, &mut pm));
         }
 
-        pm.cost = (pm.cost * 100.0).round() / 100.0;
         pm
     }
 
@@ -580,6 +579,8 @@ impl Schedule {
             pm = Some(pm_hold);
             num_blocks = 1;
         }
+
+        total_cost = (total_cost * 100.0).round() / 100.0;
 
         if total_cost < best_blocks.total_cost {
             self.collect_blocks(quad, self.tariffs.length, next_charge_in, total_cost, pm)
