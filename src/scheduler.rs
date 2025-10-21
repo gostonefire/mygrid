@@ -405,7 +405,7 @@ impl Schedule {
             .map(|(i, t)| instance_charge[i] * t)
             .sum::<f64>();
 
-        (c_price, end)
+        ((c_price * 100.0).round() / 100.0, end)
     }
 
     /// Creates a charge block
@@ -508,6 +508,7 @@ impl Schedule {
                 .for_each(|(i, &np)| self.add_net_prod(i + start, np, &mut pm));
         }
 
+        pm.cost = (pm.cost * 100.0).round() / 100.0;
         pm
     }
 
