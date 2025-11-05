@@ -3,11 +3,8 @@ use std::fmt::Formatter;
 use std::sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard};
 use chrono::{Local, RoundingError};
 use chrono::format::ParseError;
-use crate::manager_forecast::errors::ForecastError;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
-use crate::manager_nordpool::errors::NordPoolError;
-use crate::manager_production::errors::ProdError;
 use crate::scheduler::Block;
 
 
@@ -203,23 +200,19 @@ impl From<FoxError> for SchedulingError {
         SchedulingError(e.to_string())
     }
 }
-impl From<NordPoolError> for SchedulingError {
-    fn from(e: NordPoolError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
-impl From<ForecastError> for SchedulingError {
-    fn from(e: ForecastError) -> Self {
-        SchedulingError(e.to_string())
-    }
-}
 impl From<BackupError> for SchedulingError {
     fn from(e: BackupError) -> Self {
         SchedulingError(e.to_string())
     }
 }
-impl From<ProdError> for SchedulingError {
-    fn from(e: ProdError) -> Self { SchedulingError(e.to_string()) }
+impl From<serde_json::Error> for SchedulingError {
+    fn from(e: serde_json::Error) -> Self { SchedulingError(e.to_string()) }
+}
+impl From<glob::PatternError> for SchedulingError {
+    fn from(e: glob::PatternError) -> Self { SchedulingError(e.to_string()) }
+}
+impl From<chrono::format::ParseError> for SchedulingError {
+    fn from(e: chrono::format::ParseError) -> Self { SchedulingError(e.to_string()) }
 }
 
 /// Error depicting errors that occur while doing skip file operations
@@ -246,12 +239,4 @@ impl From<PoisonError<RwLockReadGuard<'_, bool>>> for SkipError {
 }
 impl From<PoisonError<RwLockWriteGuard<'_, bool>>> for SkipError {
     fn from(e: PoisonError<RwLockWriteGuard<'_, bool>>) -> Self { SkipError(e.to_string()) }
-}
-
-/// Error depicting errors that occur during Monotonic Cubic Spline interpolation
-/// 
-#[derive(Debug)]
-pub struct SplineError(pub String);
-impl fmt::Display for SplineError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result { write!(f, "SplineError: {}", self.0) }
 }

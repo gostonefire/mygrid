@@ -4,22 +4,14 @@ use log::info;
 use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
 use crate::backup::load_schedule_blocks;
 use crate::config::{load_config, Config};
-use crate::consumption::Consumption;
 use crate::errors::{MyGridInitError};
 use crate::logging::setup_logger;
-use crate::manager_forecast::Forecast;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
-use crate::manager_nordpool::NordPool;
-use crate::manager_production::PVProduction;
 use crate::scheduler::Schedule;
 
 pub struct Mgr {
     pub fox: Fox,
-    pub nordpool: NordPool,
-    pub forecast: Forecast,
-    pub pv: PVProduction,
-    pub cons: Consumption,
     pub mail: Mail,
     pub schedule: Schedule,
 }
@@ -57,23 +49,15 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     }
     
     // Load any existing schedule blocks
-    let schedule_blocks = load_schedule_blocks(&config.files.backup_dir, Local::now())?;
+    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, Local::now())?;
     
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
-    let nordpool = NordPool::new();
-    let smhi = Forecast::new(&config);
-    let pv = PVProduction::new(&config.production, config.geo_ref.lat, config.geo_ref.long);
-    let cons = Consumption::new(&config.consumption);
     let mail = Mail::new(&config.mail)?;
-    let schedule = Schedule::new(&config.charge, schedule_blocks);
+    let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, schedule_blocks);
 
     let mgr = Mgr {
         fox,
-        nordpool,
-        forecast: smhi,
-        pv,
-        cons,
         mail,
         schedule,
     };

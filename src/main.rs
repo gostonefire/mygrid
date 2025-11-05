@@ -7,22 +7,17 @@ use crate::initialization::init;
 use crate::manager_mail::Mail;
 use crate::worker::run;
 
-mod manager_nordpool;
-mod manager_fox_cloud;
 mod models;
-mod consumption;
 mod macros;
 mod initialization;
 mod worker;
 mod errors;
 mod backup;
+mod manager_fox_cloud;
 mod manager_mail;
 mod manual;
 mod config;
-mod spline;
 mod logging;
-mod manager_forecast;
-mod manager_production;
 mod scheduler;
 
 /// Debug mode means no write operations to inverter (except time)
