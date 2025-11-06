@@ -1,9 +1,9 @@
-use std::thread;
+use std::{fs, thread};
 use chrono::{DateTime, Datelike, Local, Timelike, Duration};
 use log::info;
+use anyhow::Result;
 use crate::manager_fox_cloud::Fox;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
-use crate::backup::save_schedule_blocks;
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
@@ -84,19 +84,19 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
             match block.block_type {
                 BlockType::Charge => {
                     status = set_charge(&mgr.fox, soc, block).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), block)
+                        MyGridWorkerError(format!("error set charge: {}", e.to_string()))
                     })?;
                 },
 
                 BlockType::Hold => {
                     status = set_hold(&mgr.fox, soc, block.soc_in as u8).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), block)
+                        MyGridWorkerError(format!("error set hold: {}", e.to_string()))
                     })?;
                 },
 
                 BlockType::Use => {
                     status = set_use(&mgr.fox).map_err(|e| {
-                        MyGridWorkerError::new(e.to_string(), block)
+                        MyGridWorkerError(format!("error set use: {}", e.to_string()))
                     })?;
                 },
             }
@@ -259,6 +259,22 @@ fn log_schedule(schedule: &Schedule) {
     for s in &schedule.blocks {
         info!("{}", s);
     }
+}
+
+/// Saves scheduled blocks to file
+///
+/// # Arguments
+///
+/// * 'schedule_dir' - the directory to save the file to
+/// * 'blocks' - schedule blocks to save
+pub fn save_schedule_blocks(schedule_dir: &str, blocks: &Vec<Block>) -> Result<(), MyGridWorkerError> {
+    let file_path = format!("{}schedule.json", schedule_dir);
+
+    let json = serde_json::to_string_pretty(blocks)?;
+
+    fs::write(file_path, json)?;
+
+    Ok(())
 }
 
 /// Check if we are in debug mode or manual day

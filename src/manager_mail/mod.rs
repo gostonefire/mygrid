@@ -4,6 +4,7 @@ use lettre::message::Mailbox;
 use lettre::{Message, SmtpTransport, Transport};
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
+use anyhow::Result;
 use crate::config::MailParameters;
 use crate::manager_mail::errors::MailError;
 

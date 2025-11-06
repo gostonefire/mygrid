@@ -1,6 +1,7 @@
 use std::fs;
 use log::LevelFilter;
 use serde::Deserialize;
+use anyhow::Result;
 use crate::errors::ConfigError;
 
 #[derive(Deserialize)]

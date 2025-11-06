@@ -7,6 +7,7 @@ use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use ureq::Agent;
 use ureq::http::{HeaderMap, HeaderName, HeaderValue};
+use anyhow::Result;
 use crate::config::FoxESS;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
@@ -195,7 +196,7 @@ impl Fox {
         let url = format!("{}{}", REQUEST_DOMAIN, path);
 
         let mut req = self.agent.post(url);
-        let headers = req.headers_mut().ok_or(FoxError::FoxCloud("RequestBuilder Error".to_string()))?;
+        let headers = req.headers_mut().ok_or(FoxError("post RequestBuilder Error".to_string()))?;
         self.generate_headers(headers, &path, Some(vec!(("Content-Type", "application/json"))));
 
         let json = req
@@ -205,7 +206,7 @@ impl Fox {
 
         let fox_res: FoxResponse = serde_json::from_str(&json)?;
         if fox_res.errno != 0 {
-            return Err(FoxError::FoxCloud(format!("errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
+            return Err(FoxError(format!("fox cloud errno: {}, msg: {}", fox_res.errno, fox_res.msg)));
         }
 
         Ok(json)
@@ -271,13 +272,13 @@ impl Fox {
 
         // Check schedule 1 for inconsistencies
         let start_1 = NaiveTime::from_hms_opt(start_hour_1 as u32, start_minute_1 as u32, 0)
-            .ok_or(FoxError::from("Schedule 1, start time error"))?;
+            .ok_or(FoxError("charge schedule 1 start time error".to_string()))?;
         let end_1 = NaiveTime::from_hms_opt(end_hour_1 as u32, end_minute_1 as u32, 0)
-            .ok_or(FoxError::from("Schedule 1, end time error"))?;
+            .ok_or(FoxError("charge schedule 1 end time error".to_string()))?;
         let dur_1 = end_1 - start_1;
 
         if dur_1 < TimeDelta::new(0, 0).unwrap() {
-            return Err(FoxError::from("Schedule 1, start time after end time"));
+            return Err(FoxError("charge schedule 1 start time is after end time".to_string()));
         }
 
         if !enable_1 || dur_1 == TimeDelta::new(0, 0).unwrap() {
@@ -290,13 +291,13 @@ impl Fox {
 
         // Check schedule 2 for inconsistencies
         let start_2 = NaiveTime::from_hms_opt(start_hour_2 as u32, start_minute_2 as u32, 0)
-            .ok_or(FoxError::from("Schedule 2, start time error"))?;
+            .ok_or(FoxError("charge schedule 2 start time error".to_string()))?;
         let end_2 = NaiveTime::from_hms_opt(end_hour_2 as u32, end_minute_2 as u32, 0)
-            .ok_or(FoxError::from("Schedule 2, end time error"))?;
+            .ok_or(FoxError("charge schedule 2 end time error".to_string()))?;
         let dur_2 = end_2 - start_2;
 
         if dur_2 < TimeDelta::new(0, 0).unwrap() {
-            return Err(FoxError::from("Schedule 2, start time after end time"));
+            return Err(FoxError("charge schedule 2 start time is after end time".to_string()));
         }
 
         if !enable_2 || dur_2 <= TimeDelta::new(0, 0).unwrap() {
@@ -311,10 +312,10 @@ impl Fox {
         // Check if schedules are overlapping
         if enable_1 && enable_2 {
             if start_2 >= start_1 && start_2 <= start_1 + dur_1 {
-                return Err(FoxError::from("Overlapping schedules"));
+                return Err(FoxError("overlapping charge schedules".to_string()));
             }
             if end_2 >= start_1 && end_2 <= start_1 + dur_1 {
-                return Err(FoxError::from("Overlapping schedules"));
+                return Err(FoxError("overlapping charge schedules".to_string()));
             }
         }
 
@@ -348,7 +349,7 @@ impl Fox {
                                 device_time.second);
 
         let naive_device_time = NaiveDateTime::parse_from_str(&dt_string, "%Y-%m-%d %H:%M:%S")
-            .map_err(|e| format!("Illegal date time format [{}]: {}", dt_string, e.to_string()))?;
+            .map_err(|e| FoxError(format!("illegal date time format from FoxCloud [{}]: {}", dt_string, e.to_string())))?;
 
         Ok(naive_device_time)
     }

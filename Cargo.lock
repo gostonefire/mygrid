@@ -813,6 +813,7 @@ checksum = "dce6dd36094cac388f119d2e9dc82dc730ef91c32a6222170d630e5414b956e6"
 name = "mygrid"
 version = "3.0.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "glob",
  "lettre",
@@ -822,6 +823,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "thiserror",
  "toml",
  "ureq",
 ]

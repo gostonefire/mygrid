@@ -1,14 +1,15 @@
-use std::env;
-use chrono::Local;
+use std::{env, fs};
+use std::path::Path;
+use chrono::{DateTime, Datelike, Local};
 use log::info;
+use anyhow::Result;
 use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
-use crate::backup::load_schedule_blocks;
 use crate::config::{load_config, Config};
-use crate::errors::{MyGridInitError};
+use crate::errors::MyGridInitError;
 use crate::logging::setup_logger;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
-use crate::scheduler::Schedule;
+use crate::scheduler::{Block, Schedule};
 
 pub struct Mgr {
     pub fox: Fox,
@@ -63,4 +64,28 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     };
  
     Ok((config, mgr))
+}
+
+/// Loads scheduled blocks from file
+///
+/// # Arguments
+///
+/// * 'schedule_dir' - the directory to load the file from
+/// * 'date_time' - datetime object used to check if the loaded schedule blocks are valid for the given day
+pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Local>) -> Result<Option<Vec<Block>>, MyGridInitError> {
+    let file_path = format!("{}schedule.json", schedule_dir);
+    let day = date_time.ordinal0();
+
+    if Path::new(&file_path).exists() {
+        let json = fs::read_to_string(file_path)?;
+        let blocks: Vec<Block> = serde_json::from_str(&json)?;
+
+        if blocks.iter().any(|b| b.start_time.ordinal0() == day) {
+            Ok(Some(blocks))
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
+    }
 }

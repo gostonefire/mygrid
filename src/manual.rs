@@ -1,6 +1,7 @@
 use std::path::Path;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::Deserialize;
+use anyhow::Result;
 use crate::errors::SkipError;
 use crate::MANUAL_DAY;
 

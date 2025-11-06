@@ -12,7 +12,6 @@ mod macros;
 mod initialization;
 mod worker;
 mod errors;
-mod backup;
 mod manager_fox_cloud;
 mod manager_mail;
 mod manual;
