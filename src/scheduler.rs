@@ -1,11 +1,15 @@
 use std::{fmt, fs};
 use std::fmt::Formatter;
+use std::ops::Add;
 use std::path::PathBuf;
-use chrono::{DateTime, DurationRound, Local, NaiveDateTime, TimeDelta};
+use chrono::{DateTime, DurationRound, Local, NaiveDateTime, TimeDelta, Timelike};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use crate::errors::SchedulingError;
+
+/// Size of the smallest block possible in minutes
+const BLOCK_UNIT_SIZE: i64 = 15;
 
 /// Available block types
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -71,11 +75,13 @@ pub struct Block {
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let length = self.end_time.add(TimeDelta::minutes(BLOCK_UNIT_SIZE)) - self.start_time;
+
         // Build base output
-        let output = format!("{} -> {:>02}:{:>02} - {:>02}:{:>02}: SocIn {:>3}, SocOut {:>3}, True SocIn: {:>3}, Cost {:>5.2} ",
+        let output = format!("{} -> {:>02}:{:>02} - Length: {:>02}:{:>02}: SocIn {:>3}, SocOut {:>3}, True SocIn: {:>3}, Cost {:>5.2} ",
                              self.block_type,
-                             self.start_hour, self.start_minute,
-                             self.end_hour, self.end_minute,
+                             self.start_time.hour(), self.start_time.minute(),
+                             length.num_hours(), length.num_minutes() - length.num_hours() * 60,
                              self.soc_in, self.soc_out,
                              self.true_soc_in.unwrap_or(0), self.cost);
 
@@ -136,7 +142,7 @@ impl Schedule {
     /// * 'date_time' - the time to get a block for
     /// * 'with_fallback' - if set to true, and if there is no block for the given time, a fallback schedule is created
     pub fn get_block_by_time(&mut self, date_time: DateTime<Local>, with_fallback: bool) -> Option<usize> {
-        let date_hour = date_time.duration_trunc(TimeDelta::minutes(15)).unwrap();
+        let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         for b in self.blocks.iter() {
             if b.start_time <= date_hour && b.end_time >= date_hour {
                 return Some(b.block_id);
@@ -167,7 +173,7 @@ impl Schedule {
     /// * 'block_id' - id of the block to check
     /// * 'date_time' - the date time the block is valid for
     pub fn is_update_time(&self, block_id: usize, date_time: DateTime<Local>) -> bool {
-        let date_hour = date_time.duration_trunc(TimeDelta::minutes(15)).unwrap();
+        let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         let block = self.blocks.iter().find(|b| b.block_id == block_id);
 
         block.is_none_or(|b| (b.start_time > date_hour || b.end_time < date_hour) ||
@@ -181,7 +187,7 @@ impl Schedule {
     /// * 'block_id' - id of the block to check
     /// * 'date_time' - the date time the block is valid for
     pub fn is_active_charging(&self, block_id: usize, date_time: DateTime<Local>) -> bool {
-        let date_hour = date_time.duration_trunc(TimeDelta::minutes(15)).unwrap();
+        let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         let block = self.blocks.iter().find(|b| b.block_id == block_id);
 
         block.is_some_and(|b| b.start_time <= date_hour && b.end_time >= date_hour
