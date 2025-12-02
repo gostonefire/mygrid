@@ -1,8 +1,9 @@
 pub mod errors;
 
+use std::ops::Add;
 use std::str::FromStr;
 use std::time::Duration;
-use chrono::{Datelike, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveTime, TimeDelta, Timelike, Utc};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use ureq::Agent;
@@ -12,7 +13,6 @@ use crate::config::FoxESS;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
 use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
-use crate::models::fox_device_time::{DeviceTime, DeviceTimeResult, RequestTime};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
 
@@ -102,26 +102,30 @@ impl Fox {
     ///
     /// # Arguments
     ///
-    /// * 'enable_1' - whether schedule 1 shall be enabled
-    /// * 'start_hour_1' - start hour of schedule 1
-    /// * 'start_minute_1' - start minute of schedule 1
-    /// * 'end_hour_1' - end hour of schedule 1
-    /// * 'end_minute_1' - end minute of schedule 1
-    /// * 'enable_2' - whether schedule 2 shall be enabled
-    /// * 'start_hour_2' - start hour of schedule 2
-    /// * 'start_minute_2' - start minute of schedule 2
-    /// * 'end_hour_2' - end hour of schedule 2
-    /// * 'end_minute_2' - end minute of schedule 2
-    pub fn set_battery_charging_time_schedule(
-        &self,
-        enable_1: bool, start_hour_1: u8, start_minute_1: u8, end_hour_1: u8, end_minute_1: u8,
-        enable_2: bool, start_hour_2: u8, start_minute_2: u8, end_hour_2: u8, end_minute_2: u8,
-    ) -> Result<(), FoxError> {
+    /// * 'enable' - whether schedule 1 shall be enabled
+    /// * 'start' - start time of schedule 1 as a DateTime<Utc>
+    /// * 'end' - end time of schedule 1 as a DateTime<Utc> (non-inclusive)
+    pub fn set_battery_charging_time_schedule(&self, enable: bool, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<(), FoxError> {
         let path = "/op/v0/device/battery/forceChargeTime/set";
 
+        let mut start_hour: u8 = 0;
+        let mut start_minute: u8 = 0;
+        let mut end_hour: u8 = 0;
+        let mut end_minute: u8 = 0;
+
+        if enable {
+            let start_local = start.with_timezone(&Local);
+            let end_local = end.with_timezone(&Local).add(TimeDelta::minutes(-1));
+
+            start_hour = start_local.hour() as u8;
+            start_minute = start_local.minute() as u8;
+            end_hour = end_local.hour() as u8;
+            end_minute = end_local.minute() as u8;
+        }
+
         let schedule = self.build_charge_time_schedule(
-            enable_1, start_hour_1, start_minute_1, end_hour_1, end_minute_1,
-            enable_2, start_hour_2, start_minute_2, end_hour_2, end_minute_2,
+            enable, start_hour, start_minute, end_hour, end_minute,
+            false, 0, 0, 0, 0,
         )?;
         let req_json = serde_json::to_string(&schedule)?;
 
@@ -134,11 +138,11 @@ impl Fox {
     ///
     pub fn disable_charge_schedule(&self) -> Result<(), FoxError> {
         self.set_battery_charging_time_schedule(
-            false, 0, 0, 0, 0,
-            false, 0, 0, 0, 0,
+            false, Default::default(), Default::default()
         )
     }
 
+    /*
     /// Get the inverter local time
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
@@ -183,6 +187,8 @@ impl Fox {
 
         Ok(())
     }
+
+     */
 
     /// Builds a request and sends it as a POST.
     /// The return is the JSON representation of the result as specified by
@@ -331,6 +337,7 @@ impl Fox {
         })
     }
 
+    /*
     /// Converts a DeviceTime struct to the NaiveDateTime format.
     /// The reason for going through NaiveDateTime is that the inverter is timezone unaware,
     /// hence when passing between summer and winter time, there may be a gap where an hour
@@ -353,6 +360,8 @@ impl Fox {
 
         Ok(naive_device_time)
     }
+
+     */
 }
 
 #[derive(Serialize, Deserialize)]

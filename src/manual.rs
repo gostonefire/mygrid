@@ -1,5 +1,5 @@
 use std::path::Path;
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::Deserialize;
 use anyhow::Result;
 use crate::errors::SkipError;
@@ -21,12 +21,12 @@ struct ManualDates {
 ///
 /// * 'manual_file' - the file holding any dates indicating going manual
 /// * 'date' - date to check if to set manual mode
-pub fn check_manual(manual_file: &str, date: DateTime<Local>) -> Result<Option<bool>, SkipError> {
+pub fn check_manual(manual_file: &str, date: DateTime<Utc>) -> Result<Option<bool>, SkipError> {
     let was_manual = *MANUAL_DAY.read()?;
 
     let path = Path::new(manual_file);
     if path.exists() {
-        let date = date.date_naive();
+        let date = date.with_timezone(&Local).date_naive();
         let json = std::fs::read_to_string(&path)?;
         let manual: ManualDates = serde_json::from_str(&json)?;
 

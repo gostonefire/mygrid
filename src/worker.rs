@@ -1,5 +1,6 @@
 use std::{fs, thread};
-use chrono::{DateTime, Datelike, Local, Timelike, Duration};
+use std::ops::Add;
+use chrono::{DateTime, Duration, Utc};
 use log::info;
 use anyhow::Result;
 use crate::manager_fox_cloud::Fox;
@@ -7,23 +8,23 @@ use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
-use crate::scheduler::{Block, BlockType, Schedule, Status};
+use crate::scheduler::{Block, BlockType, Schedule, Status, BLOCK_UNIT_SIZE};
 use crate::manual::check_manual;
 
 pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
 
-    let mut charge_check_done: DateTime<Local> = DateTime::default();
-    let mut local_now: DateTime<Local> = Local::now();
-    let mut day_of_year: Option<u32> = None;
+    let mut charge_check_done: DateTime<Utc> = DateTime::default();
+    let mut utc_now: DateTime<Utc> = Utc::now();
+    // let mut day_of_year: Option<u32> = None;
 
-    let mut active_block: Option<usize> = mgr.schedule.get_block_by_time(local_now, false);
+    let mut active_block: Option<usize> = mgr.schedule.get_block_by_time(utc_now, false);
 
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
-        local_now = Local::now();
+        utc_now = Utc::now();
 
         // Check if we should go into manual mode for today
-        if let Some(manual_mode) = check_manual(&config.files.manual_file, local_now)? {
+        if let Some(manual_mode) = check_manual(&config.files.manual_file, utc_now)? {
             if manual_mode {
                 info!("manual mode activated for today");
             } else {
@@ -31,11 +32,14 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
             }
         }
 
+        /*
         // Check inverter time
-        if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != local_now.ordinal0())) && local_now.hour() >= 15 {
+        if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != utc_now.ordinal0())) && utc_now.hour() >= 15 {
             check_inverter_local_time(&mgr.fox)?;
-            day_of_year = Some(local_now.ordinal0());
+            day_of_year = Some(utc_now.ordinal0());
         }
+
+         */
 
         // The inverter seems to discard PV power when in force charge mode and the max SoC
         // has been reached. Hence, we need to check every five minutes (Fox Cloud is updated
@@ -43,31 +47,31 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
         // has been reached. If so, we disable force charge and set the inverter min soc
         // on grid to max soc (i.e., we set it to Hold) and also set the block status to Full.
         if let Some(block_id) = active_block {
-            if mgr.schedule.is_active_charging(block_id, local_now)
+            if mgr.schedule.is_active_charging(block_id, utc_now)
             {
                 let block: &mut Block = mgr.schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
-                if local_now - charge_check_done > Duration::minutes(5) {
+                if utc_now - charge_check_done > Duration::minutes(5) {
                     let soc = get_current_soc(&mgr.fox)?;
                     if let Some(status) = set_full_if_done(&mgr.fox, soc, block.soc_out)? {
                         block.update_block_status(status, None);
                         save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks)?;
                     }
-                    charge_check_done = local_now;
+                    charge_check_done = utc_now;
                 }
             }
         }
 
         // This is the main mode selector
-        if active_block.is_none_or(|b| mgr.schedule.is_update_time(b, local_now))  {
+        if active_block.is_none_or(|b| mgr.schedule.is_update_time(b, utc_now))  {
 
-            let block_id = if let Some(block_id) = mgr.schedule.get_block_by_time(local_now, false) {
+            let block_id = if let Some(block_id) = mgr.schedule.get_block_by_time(utc_now, false) {
                 block_id
             } else {
                 // If no block is active even after a schedule update, we return the id for an emergency (use) block
                 // that will be subject for renewal at each check. Hence, we will try to load a new schedule on every
                 // loop until successful.
-                mgr.schedule.update_scheduling(local_now)?;
-                let block_id = mgr.schedule.get_block_by_time(local_now, true)
+                mgr.schedule.update_scheduling(utc_now)?;
+                let block_id = mgr.schedule.get_block_by_time(utc_now, true)
                     .expect("with fallback shall return block");
 
                 if active_block.is_some_and(|b| b == block_id && block_id == 0) {
@@ -109,6 +113,7 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
     }
 }
 
+/*
 /// checks the local clock in the inverter and sets it correctly if it has drifted more than a minute
 ///
 /// # Arguments
@@ -126,6 +131,8 @@ fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
 
     Ok(())
 }
+
+ */
 
 /// Sets a charge block in the inverter
 ///
@@ -154,8 +161,7 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block) -> Result<Status, MyGridWorkerE
     } else {
         let _ = retry!(||fox.set_max_soc(block.soc_out as u8))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        true, block.start_hour as u8, 0, block.end_hour as u8, 59,
-                        false, 0, 0, 0, 0,
+                        true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE)),
                     ))?;
 
         Ok(Status::Started)

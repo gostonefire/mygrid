@@ -1,6 +1,6 @@
 use std::{env, fs};
 use std::path::Path;
-use chrono::{DateTime, Datelike, Local};
+use chrono::{DateTime, Datelike, Utc};
 use log::info;
 use anyhow::Result;
 use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
@@ -50,7 +50,7 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     }
     
     // Load any existing schedule blocks
-    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, Local::now())?;
+    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, Utc::now())?;
     
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
@@ -72,7 +72,7 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
 ///
 /// * 'schedule_dir' - the directory to load the file from
 /// * 'date_time' - datetime object used to check if the loaded schedule blocks are valid for the given day
-pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Local>) -> Result<Option<Vec<Block>>, MyGridInitError> {
+pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Result<Option<Vec<Block>>, MyGridInitError> {
     let file_path = format!("{}schedule.json", schedule_dir);
     let day = date_time.ordinal0();
 

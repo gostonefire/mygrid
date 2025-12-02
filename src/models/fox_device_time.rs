@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 
+/*
 #[derive(Deserialize)]
 pub struct DeviceTimeResult {
     pub result: DeviceTime,
@@ -21,3 +22,5 @@ pub struct DeviceTime {
 pub struct RequestTime {
     pub sn: String,
 }
+
+ */

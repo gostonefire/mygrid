@@ -2,14 +2,14 @@ use std::{fmt, fs};
 use std::fmt::Formatter;
 use std::ops::Add;
 use std::path::PathBuf;
-use chrono::{DateTime, DurationRound, Local, NaiveDateTime, TimeDelta, Timelike};
+use chrono::{DateTime, DurationRound, NaiveDateTime, TimeDelta, Timelike, Utc};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use crate::errors::SchedulingError;
 
 /// Size of the smallest block possible in minutes
-const BLOCK_UNIT_SIZE: i64 = 15;
+pub const BLOCK_UNIT_SIZE: i64 = 15;
 
 /// Available block types
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -55,13 +55,13 @@ impl fmt::Display for Status {
 pub struct Block {
     block_id: usize,
     pub block_type: BlockType,
-    pub start_time: DateTime<Local>,
-    pub end_time: DateTime<Local>,
-    pub start_hour: usize,
-    pub start_minute: usize,
-    pub end_hour: usize,
-    pub end_minute: usize,
-    size: usize,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    //pub start_hour: usize,
+    //pub start_minute: usize,
+    //pub end_hour: usize,
+    //pub end_minute: usize,
+    //size: usize,
     pub cost: f64,
     pub charge_in: f64,
     pub charge_out: f64,
@@ -141,7 +141,7 @@ impl Schedule {
     ///
     /// * 'date_time' - the time to get a block for
     /// * 'with_fallback' - if set to true, and if there is no block for the given time, a fallback schedule is created
-    pub fn get_block_by_time(&mut self, date_time: DateTime<Local>, with_fallback: bool) -> Option<usize> {
+    pub fn get_block_by_time(&mut self, date_time: DateTime<Utc>, with_fallback: bool) -> Option<usize> {
         let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         for b in self.blocks.iter() {
             if b.start_time <= date_hour && b.end_time >= date_hour {
@@ -172,7 +172,7 @@ impl Schedule {
     ///
     /// * 'block_id' - id of the block to check
     /// * 'date_time' - the date time the block is valid for
-    pub fn is_update_time(&self, block_id: usize, date_time: DateTime<Local>) -> bool {
+    pub fn is_update_time(&self, block_id: usize, date_time: DateTime<Utc>) -> bool {
         let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         let block = self.blocks.iter().find(|b| b.block_id == block_id);
 
@@ -186,7 +186,7 @@ impl Schedule {
     ///
     /// * 'block_id' - id of the block to check
     /// * 'date_time' - the date time the block is valid for
-    pub fn is_active_charging(&self, block_id: usize, date_time: DateTime<Local>) -> bool {
+    pub fn is_active_charging(&self, block_id: usize, date_time: DateTime<Utc>) -> bool {
         let date_hour = date_time.duration_trunc(TimeDelta::minutes(BLOCK_UNIT_SIZE)).unwrap();
         let block = self.blocks.iter().find(|b| b.block_id == block_id);
 
@@ -199,7 +199,7 @@ impl Schedule {
     /// # Arguments
     ///
     /// * 'date_time' - the date time to stamp on the schedule
-    pub fn update_scheduling(&mut self, date_time: DateTime<Local>) -> Result<(), SchedulingError> {
+    pub fn update_scheduling(&mut self, date_time: DateTime<Utc>) -> Result<(), SchedulingError> {
         let path = format!("{}*_schedule.json", self.schedule_dir);
         for entry in glob::glob(&path)? {
             match entry {
@@ -227,7 +227,7 @@ impl Schedule {
 /// # Arguments
 /// 
 /// * 'path_buf' - the full path to the schedule file
-fn get_schedule_time(path_buf: &PathBuf) -> Result<(DateTime<Local>, DateTime<Local>), SchedulingError> {
+fn get_schedule_time(path_buf: &PathBuf) -> Result<(DateTime<Utc>, DateTime<Utc>), SchedulingError> {
     let file_name = path_buf.file_name()
         .ok_or("Error in schedule file name")?
         .to_str()
@@ -236,8 +236,8 @@ fn get_schedule_time(path_buf: &PathBuf) -> Result<(DateTime<Local>, DateTime<Lo
     if file_name.len() != 39 {
         Err("malformed schedule file name")?
     } else {
-        let start = NaiveDateTime::parse_from_str(&file_name[0..12], "%Y%m%d%H%M")?.and_local_timezone(Local).unwrap();
-        let end = NaiveDateTime::parse_from_str(&file_name[13..25], "%Y%m%d%H%M")?.and_local_timezone(Local).unwrap();
+        let start = NaiveDateTime::parse_from_str(&file_name[0..12], "%Y%m%d%H%M")?.and_utc();
+        let end = NaiveDateTime::parse_from_str(&file_name[13..25], "%Y%m%d%H%M")?.and_utc();
         Ok((start, end))
     }
 }
@@ -253,11 +253,11 @@ fn get_fallback_schedule(soc_kwh: f64) -> Vec<Block> {
         block_type: BlockType::Use,
         start_time: Default::default(),
         end_time: Default::default(),
-        start_hour: 0,
-        start_minute: 0,
-        end_hour: 0,
-        end_minute: 0,
-        size: 0,
+        //start_hour: 0,
+        //start_minute: 0,
+        //end_hour: 0,
+        //end_minute: 0,
+        //size: 0,
         cost: 0.0,
         charge_in: 10.0 * soc_kwh,
         charge_out: 10.0 * soc_kwh,

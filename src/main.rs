@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Utc};
 use log::error;
 use crate::initialization::init;
 use crate::manager_mail::Mail;
@@ -29,7 +29,7 @@ static LOGGER_INITIALIZED: RwLock<bool> = RwLock::new(false);
 
 fn main() {
     let mut n_errors = 0;
-    let mut last_error = Local::now();
+    let mut last_error = Utc::now();
 
     loop {
         let (config, mut mgr) = match init() {
@@ -69,14 +69,14 @@ fn main() {
 /// * 'n_errors' - the number of errors occurred so far with spacing under one hour
 /// * 'last_error' - the time the last error occurred
 /// * 'mail' - mail sender struct
-fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Local>, mail: Option<&Mail>) -> (i32, DateTime<Local>) {
+fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Utc>, mail: Option<&Mail>) -> (i32, DateTime<Utc>) {
     if let Some(g) = mail {
         let _ = g.send_mail("Error caught".to_string(), msg.clone());
     }
 
     eprintln!("{}", msg);
 
-    let now = Local::now();
+    let now = Utc::now();
     if now - last_error > chrono::Duration::minutes(60) {
         n_errors = 1;
     } else if n_errors >= 10 {
@@ -89,5 +89,5 @@ fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Local>, mai
     n_errors += 1;
 
     thread::sleep(Duration::from_secs(600));
-    (n_errors, Local::now())
+    (n_errors, Utc::now())
 }
