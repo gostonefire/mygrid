@@ -142,54 +142,6 @@ impl Fox {
         )
     }
 
-    /*
-    /// Get the inverter local time
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20the20device20time0a3ca20id3dget20the20device20time4303e203ca3e
-    ///
-    pub fn get_device_time(&self) -> Result<NaiveDateTime, FoxError> {
-        let path = "/op/v0/device/time/get";
-
-        let req = RequestTime { sn: self.sn.clone() };
-        let req_json = serde_json::to_string(&req)?;
-
-        let json = self.post_request(&path, req_json)?;
-
-        let fox_data: DeviceTimeResult = serde_json::from_str(&json)?;
-
-        let device_time = Fox::device_time_to_date_time(&fox_data.result)?;
-
-        Ok(device_time)
-    }
-
-    /// Set the inverter local time
-    ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20time0a3ca20id3dset20the20device20time4303e203ca3e
-    ///
-    /// # Arguments
-    ///
-    /// * 'date_time' - date and time as a DateTime<Local>, i.e., OS local time
-    pub fn set_device_time(&self, date_time: NaiveDateTime) -> Result<(), FoxError> {
-        let path = "/op/v0/device/time/set";
-
-        let req = DeviceTime {
-            sn: self.sn.clone(),
-            year: date_time.year().to_string(),
-            month: date_time.month().to_string(),
-            day: date_time.day().to_string(),
-            hour:date_time.hour().to_string(),
-            minute: date_time.minute().to_string(),
-            second: date_time.second().to_string(),
-        };
-        let req_json = serde_json::to_string(&req)?;
-
-        let _ = self.post_request(&path, req_json)?;
-
-        Ok(())
-    }
-
-     */
-
     /// Builds a request and sends it as a POST.
     /// The return is the JSON representation of the result as specified by
     ///  the respective FoxESS API
@@ -336,32 +288,6 @@ impl Fox {
             end_time_2: ChargingTime { hour: end_hour_2, minute: end_minute_2 },
         })
     }
-
-    /*
-    /// Converts a DeviceTime struct to the NaiveDateTime format.
-    /// The reason for going through NaiveDateTime is that the inverter is timezone unaware,
-    /// hence when passing between summer and winter time, there may be a gap where an hour
-    /// might hit a gap or a fold in time with time zone awareness.
-    ///
-    /// # Arguments
-    ///
-    /// * 'device_time' - the DeviceTime struct from the inverter response
-    fn device_time_to_date_time(device_time: &DeviceTime) -> Result<NaiveDateTime, FoxError> {
-        let dt_string = format!("{}-{}-{} {}:{}:{}",
-                                device_time.year,
-                                device_time.month,
-                                device_time.day,
-                                device_time.hour,
-                                device_time.minute,
-                                device_time.second);
-
-        let naive_device_time = NaiveDateTime::parse_from_str(&dt_string, "%Y-%m-%d %H:%M:%S")
-            .map_err(|e| FoxError(format!("illegal date time format from FoxCloud [{}]: {}", dt_string, e.to_string())))?;
-
-        Ok(naive_device_time)
-    }
-
-     */
 }
 
 #[derive(Serialize, Deserialize)]

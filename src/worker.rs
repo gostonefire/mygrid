@@ -32,15 +32,6 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
             }
         }
 
-        /*
-        // Check inverter time
-        if (day_of_year.is_none() || day_of_year.is_some_and(|d| d != utc_now.ordinal0())) && utc_now.hour() >= 15 {
-            check_inverter_local_time(&mgr.fox)?;
-            day_of_year = Some(utc_now.ordinal0());
-        }
-
-         */
-
         // The inverter seems to discard PV power when in force charge mode and the max SoC
         // has been reached. Hence, we need to check every five minutes (Fox Cloud is updated
         // with that frequency) if we have a started and running charge block where max SoC
@@ -112,27 +103,6 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
         }
     }
 }
-
-/*
-/// checks the local clock in the inverter and sets it correctly if it has drifted more than a minute
-///
-/// # Arguments
-///
-/// * 'fox' - reference to the Fox struct
-fn check_inverter_local_time(fox: &Fox) -> Result<(), MyGridWorkerError> {
-    let dt = retry!(||fox.get_device_time())?;
-    let now = Local::now().naive_local();
-    let delta = (now - dt).abs();
-
-    if delta > Duration::minutes(1) {
-        info!("setting inverter time");
-        let _ = fox.set_device_time(now)?;
-    }
-
-    Ok(())
-}
-
- */
 
 /// Sets a charge block in the inverter
 ///

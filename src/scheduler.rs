@@ -57,11 +57,6 @@ pub struct Block {
     pub block_type: BlockType,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
-    //pub start_hour: usize,
-    //pub start_minute: usize,
-    //pub end_hour: usize,
-    //pub end_minute: usize,
-    //size: usize,
     pub cost: f64,
     pub charge_in: f64,
     pub charge_out: f64,
@@ -128,7 +123,6 @@ impl Schedule {
     /// * 'schedule_blocks' - any existing schedule blocks
     pub fn new(schedule_dir: &str, soc_kwh: f64, schedule_blocks: Option<Vec<Block>>) -> Schedule {
         Schedule {
-            //date_time: Default::default(),
             schedule_dir: schedule_dir.to_string(),
             soc_kwh,
             blocks: schedule_blocks.unwrap_or(Vec::new()),
@@ -253,11 +247,6 @@ fn get_fallback_schedule(soc_kwh: f64) -> Vec<Block> {
         block_type: BlockType::Use,
         start_time: Default::default(),
         end_time: Default::default(),
-        //start_hour: 0,
-        //start_minute: 0,
-        //end_hour: 0,
-        //end_minute: 0,
-        //size: 0,
         cost: 0.0,
         charge_in: 10.0 * soc_kwh,
         charge_out: 10.0 * soc_kwh,
