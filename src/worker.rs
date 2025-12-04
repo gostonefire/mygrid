@@ -14,14 +14,14 @@ use crate::manual::check_manual;
 pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
 
     let mut charge_check_done: DateTime<Utc> = DateTime::default();
-    let mut utc_now: DateTime<Utc> = Utc::now();
-    // let mut day_of_year: Option<u32> = None;
+    let mut utc_now: DateTime<Utc> = mgr.time.utc_now();
+
 
     let mut active_block: Option<usize> = mgr.schedule.get_block_by_time(utc_now, false);
 
     loop {
         thread::sleep(std::time::Duration::from_secs(10));
-        utc_now = Utc::now();
+        utc_now = mgr.time.utc_now();
 
         // Check if we should go into manual mode for today
         if let Some(manual_mode) = check_manual(&config.files.manual_file, utc_now)? {

@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, TimeDelta, Utc};
 use log::error;
 use crate::initialization::init;
 use crate::manager_mail::Mail;
@@ -90,4 +90,33 @@ fn manage_error(msg: String, mut n_errors: i32, last_error: DateTime<Utc>, mail:
 
     thread::sleep(Duration::from_secs(600));
     (n_errors, Utc::now())
+}
+
+pub struct UtcNow {
+    time_delta: TimeDelta,
+}
+
+impl UtcNow {
+    /// Creates a new UtcNow struct with any eventual time_delta
+    /// 
+    /// # Arguments
+    /// 
+    /// * 'debug_run_start' - time that reflects a point in time that the worker's clock should start at
+    pub fn new(debug_run_start: Option<DateTime<Local>>) -> Self {
+        let time_delta = if let Some(debug_run_start) = debug_run_start {
+            Utc::now() - debug_run_start.with_timezone(&Utc)
+        } else {
+            TimeDelta::minutes(0)
+        };
+        
+        Self {
+            time_delta,
+        }
+    }
+
+    /// Returns utc now with any configured time delta applied
+    ///
+    pub fn utc_now(&self) -> DateTime<Utc> {
+        Utc::now() - self.time_delta
+    }
 }

@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::{DateTime, Datelike, Utc};
 use log::info;
 use anyhow::Result;
-use crate::{DEBUG_MODE, LOGGER_INITIALIZED};
+use crate::{UtcNow, DEBUG_MODE, LOGGER_INITIALIZED};
 use crate::config::{load_config, Config};
 use crate::errors::MyGridInitError;
 use crate::logging::setup_logger;
@@ -15,6 +15,7 @@ pub struct Mgr {
     pub fox: Fox,
     pub mail: Mail,
     pub schedule: Schedule,
+    pub time: UtcNow,
 }
 
 /// Initializes and returns configuration, a Mgr struct holding various of initialized structs, 
@@ -48,19 +49,24 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     if *DEBUG_MODE.read()? {
         info!("running in Debug Mode!!");
     }
-    
+
+    // Instantiate time object
+    let time = UtcNow::new(config.general.debug_run_time);
+
     // Load any existing schedule blocks
-    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, Utc::now())?;
+    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, time.utc_now())?;
     
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
     let mail = Mail::new(&config.mail)?;
     let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, schedule_blocks);
 
+
     let mgr = Mgr {
         fox,
         mail,
         schedule,
+        time,
     };
  
     Ok((config, mgr))

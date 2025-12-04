@@ -2,6 +2,7 @@ use std::fs;
 use log::LevelFilter;
 use serde::Deserialize;
 use anyhow::Result;
+use chrono::{DateTime, Local};
 use crate::errors::ConfigError;
 
 #[derive(Deserialize)]
@@ -32,6 +33,7 @@ pub struct Files {
 
 #[derive(Deserialize)]
 pub struct General {
+    pub debug_run_time: Option<DateTime<Local>>,
     pub log_path: String,
     pub log_level: LevelFilter,
     pub log_to_stdout: bool,
