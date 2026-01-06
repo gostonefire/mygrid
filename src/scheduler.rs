@@ -110,6 +110,7 @@ impl Block {
 pub struct Schedule {
     schedule_dir: String,
     soc_kwh: f64,
+    default_soc_kwh: f64,
     pub blocks: Vec<Block>,
 }
 
@@ -119,12 +120,13 @@ impl Schedule {
     /// # Arguments
     ///
     /// * 'schedule_dir' - directory where schedule files are held
-    /// * 'soc_kwh' - kWh per soc unit
+    /// * 'default_soc_kwh' - default kWh per soc unit (if no blocks are provided in the first time schedule)
     /// * 'schedule_blocks' - any existing schedule blocks
-    pub fn new(schedule_dir: &str, soc_kwh: f64, schedule_blocks: Option<Vec<Block>>) -> Schedule {
+    pub fn new(schedule_dir: &str, default_soc_kwh: f64, schedule_blocks: Option<Vec<Block>>) -> Schedule {
         Schedule {
             schedule_dir: schedule_dir.to_string(),
-            soc_kwh,
+            soc_kwh: default_soc_kwh,
+            default_soc_kwh,
             blocks: schedule_blocks.unwrap_or(Vec::new()),
         }
     }
@@ -204,6 +206,7 @@ impl Schedule {
                         let json = fs::read_to_string(p).unwrap();
                         let blocks: Vec<Block> = serde_json::from_str(&json)?;
                         self.blocks = blocks;
+                        self.soc_kwh = self.blocks.last().map(|b| b.soc_kwh).unwrap_or(self.default_soc_kwh);
                         return Ok(());
                     }
                 }
