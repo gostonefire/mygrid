@@ -1,62 +1,26 @@
 use serde::{Deserialize, Serialize};
 
-
-#[derive(Deserialize)]
-pub struct SocCurrentResult {
-    pub result: Vec<SocCurrentVariables>,
+#[derive(Serialize)]
+pub struct RequestCurrentBatState {
+    pub variables: Vec<String>,
+    pub sns: Vec<String>,
 }
 
 #[derive(Deserialize)]
-pub struct SocCurrentVariables {
-    pub datas: Vec<SocCurrentData>,
-    //pub time: String,
-    //#[serde(rename = "deviceSN")]
-    //pub device_sn: String,
+pub struct DeviceRealTimeResult {
+    pub result: Vec<RealTimeVariables>,
 }
 
 #[derive(Deserialize)]
-pub struct SocCurrentData {
-    //pub unit: String,
-    //pub name: String,
-    //pub variable: String,
+pub struct RealTimeVariables {
+    pub datas: Vec<RealTimeData>,
+}
+
+#[derive(Deserialize)]
+pub struct RealTimeData {
+    pub variable: String,
     pub value: f64,
 }
-
-#[derive(Serialize)]
-pub struct RequestCurrentSoc {
-    pub sn: String,
-    pub variables: Vec<String>,
-}
-
-/*
-#[derive(Deserialize)]
-pub struct SocSettingResult {
-    pub result: SocSetting,
-}
-
-#[derive(Deserialize)]
-pub struct SocSetting {
-    //pub unit: String,
-    //pub precision: f64,
-    //pub range: SocSettingRange,
-    pub value: String,
-}
-
-
-#[derive(Deserialize)]
-pub struct SocSettingRange {
-    pub min: f64,
-    pub max: f64,
-}
-
-
-#[derive(Serialize)]
-pub struct RequestSoc {
-    pub sn: String,
-    pub key: String,
-}
-*/
-
 
 #[derive(Serialize)]
 pub struct SetSoc {

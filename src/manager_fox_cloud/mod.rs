@@ -12,7 +12,7 @@ use anyhow::Result;
 use crate::config::FoxESS;
 use crate::manager_fox_cloud::errors::FoxError;
 use crate::models::fox_charge_time_schedule::{ChargingTime, ChargingTimeSchedule};
-use crate::models::fox_soc_settings::{SocCurrentResult, RequestCurrentSoc, SetSoc};
+use crate::models::fox_soc_settings::{SetSoc, RequestCurrentBatState, DeviceRealTimeResult};
 
 const REQUEST_DOMAIN: &str = "https://www.foxesscloud.com";
 
@@ -41,23 +41,31 @@ impl Fox {
 
     /// Get the battery current soc (state of charge)
     ///
-    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20real-time20data0a3ca20id3dget20device20real-time20data4303e203ca3e
+    /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#get20device20real-time20data0a3ca20id3dget20device20real-time20data5603e203ca3e
     ///
     /// # Arguments
     ///
     pub fn get_current_soc(&self) -> Result<u8, FoxError> {
-        let path = "/op/v0/device/real/query";
+        let path = "/op/v1/device/real/query";
 
-        let req = RequestCurrentSoc { sn: self.sn.clone(), variables: vec!["SoC".to_string()] };
+        let req = RequestCurrentBatState { sns: vec![self.sn.clone()], variables: vec!["SoC".to_string()] };
         let req_json = serde_json::to_string(&req)?;
 
         let json = self.post_request(&path, req_json)?;
+        let fox_data: DeviceRealTimeResult = serde_json::from_str(&json)?;
 
-        let fox_data: SocCurrentResult = serde_json::from_str(&json)?;
+        let mut soc: Option<u8> = None;
 
-        Ok(fox_data.result[0].datas[0].value.round() as u8)
+        for data in fox_data.result[0].datas.iter() {
+            match data.variable.as_str() {
+                "SoC" => soc = Some(data.value.round() as u8),
+                _ => (),
+            }
+        }
+
+        soc.ok_or(FoxError("No SoC data found".to_string()))
     }
-
+    
     /// Set the inverter battery min soc on grid setting
     ///
     /// See https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html#set20the20device20settings20item0a3ca20id3dset20the20device20settings20item4303e203ca3e
