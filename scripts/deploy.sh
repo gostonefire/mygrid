@@ -6,7 +6,7 @@ SUB_SCRIPT_LOG=$3
 
 HOME="/home/petste"
 APP_DIR="MyGrid"
-SERVICE_NAME="mygrid.service"
+SERVICE_NAME="mygrid"
 
 if [ -z "$REPO_NAME" ] || [ -z "$DEV_DIR" ] || [ -z "$SUB_SCRIPT_LOG" ]; then
   echo "Usage: $0 <repo_name> <dev_dir> <sub_script_log>"
@@ -59,10 +59,10 @@ run_as_user() {
   fi
 
   ### Add any extra deploy features to be run as dev user from here ###
-  cp "./systemd/$SERVICE_NAME" "$HOME/$APP_DIR/" >> "$SUB_SCRIPT_LOG" 2>&1
+  cp "./systemd/$SERVICE_NAME.service" "$HOME/$APP_DIR/" >> "$SUB_SCRIPT_LOG" 2>&1
   EXIT_CODE=$?
   if [ $EXIT_CODE -ne 0 ]; then
-    echo "could not copy ./systemd/$SERVICE_NAME to $HOME/$APP_DIR/..."
+    echo "could not copy ./systemd/$SERVICE_NAME.service to $HOME/$APP_DIR/..."
     exit $EXIT_CODE
   fi
 
@@ -79,8 +79,8 @@ run_as_user() {
 }
 
 ########## From here the script will be run as root, so add any commands such as systemctl etc. from here ##########
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-  systemctl stop --quiet "$SERVICE_NAME"
+if systemctl is-active --quiet "$SERVICE_NAME.service"; then
+  systemctl stop --quiet "$SERVICE_NAME.service"
 fi
 ########## until to here! ##########################################################################################
 
@@ -94,28 +94,19 @@ if [ $EXIT_CODE -ne 0 ]; then
 fi
 
 ########## From here the script will be run as root, so add any commands such as systemctl etc. from here ##########
-cp "$HOME/$APP_DIR/$SERVICE_NAME" /lib/systemd/system/ >> "$SUB_SCRIPT_LOG" 2>&1
+cp "$HOME/$APP_DIR/$SERVICE_NAME.service" /lib/systemd/system/ >> "$SUB_SCRIPT_LOG" 2>&1
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
-  echo "failed to copy $SERVICE_NAME to /lib/systemd/system/..."
+  echo "failed to copy $SERVICE_NAME.service to /lib/systemd/system/..."
   exit $EXIT_CODE
 fi
 
 systemctl daemon-reload
 
-if ! systemctl is-enabled --quiet "$SERVICE_NAME"; then
-  systemctl enable "$SERVICE_NAME" >> "$SUB_SCRIPT_LOG" 2>&1
-  EXIT_CODE=$?
-  if [ $EXIT_CODE -ne 0 ]; then
-    echo "could not enable $SERVICE_NAME..."
-    exit $EXIT_CODE
-  fi
-fi
-
-systemctl start "$SERVICE_NAME" >> "$SUB_SCRIPT_LOG" 2>&1
+systemctl enable --now "$SERVICE_NAME.service" >> "$SUB_SCRIPT_LOG" 2>&1
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
-  echo "could not start $SERVICE_NAME..."
+  echo "could not enable and start $SERVICE_NAME.service..."
   exit $EXIT_CODE
 fi
 
