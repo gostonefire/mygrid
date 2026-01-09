@@ -12,13 +12,17 @@ pub struct Charge {
 
 #[derive(Deserialize)]
 pub struct FoxESS {
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub inverter_sn: String,
 }
 
 #[derive(Deserialize)]
 pub struct MailParameters {
+    #[serde(default)]
     pub smtp_user: String,
+    #[serde(default)]
     pub smtp_password: String,
     pub smtp_endpoint: String,
     pub from: String,

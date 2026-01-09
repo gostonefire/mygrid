@@ -11,6 +11,11 @@ Restart=always
 RestartSec=30
 User=petste
 
+LoadCredential=fox_ess_api_key:/etc/credstore/fox_ess_api_key
+LoadCredential=fox_ess_inverter_sn:/etc/credstore/fox_ess_inverter_sn
+LoadCredential=mail_smtp_user:/etc/credstore/mail_smtp_user
+LoadCredential=mail_smtp_password:/etc/credstore/mail_smtp_password
+
 [Install]
 WantedBy=multi-user.target
 

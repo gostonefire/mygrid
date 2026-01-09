@@ -30,6 +30,12 @@ impl From<std::io::Error> for MyGridInitError {
 impl From<serde_json::Error> for MyGridInitError {
     fn from(e: serde_json::Error) -> Self { MyGridInitError(e.to_string()) }
 }
+impl From<std::env::VarError> for MyGridInitError {
+    fn from(e: std::env::VarError) -> Self { MyGridInitError(e.to_string()) }
+}
+impl From<std::string::FromUtf8Error> for MyGridInitError {
+    fn from(e: std::string::FromUtf8Error) -> Self { MyGridInitError(e.to_string()) }
+}
 
 /// Error depicting errors that occur while running the main program
 ///

@@ -59,6 +59,13 @@ run_as_user() {
   fi
 
   ### Add any extra deploy features to be run as dev user from here ###
+  cp "./config/config.toml" "$HOME/$APP_DIR/config/" >> "$SUB_SCRIPT_LOG" 2>&1
+  EXIT_CODE=$?
+  if [ $EXIT_CODE -ne 0 ]; then
+    echo "could not copy ./config/config.toml to $HOME/$APP_DIR/config/..."
+    exit $EXIT_CODE
+  fi
+
   cp "./systemd/$SERVICE_NAME.service" "$HOME/$APP_DIR/" >> "$SUB_SCRIPT_LOG" 2>&1
   EXIT_CODE=$?
   if [ $EXIT_CODE -ne 0 ]; then

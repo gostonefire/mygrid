@@ -1,5 +1,5 @@
 use std::{env, fs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, Utc};
 use log::info;
 use anyhow::Result;
@@ -33,7 +33,11 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
 
 
     // Load configuration
-    let config = load_config(&config_path)?;
+    let mut config = load_config(&config_path)?;
+    config.fox_ess.api_key = read_credential("fox_ess_api_key")?;
+    config.fox_ess.inverter_sn = read_credential("fox_ess_inverter_sn")?;
+    config.mail.smtp_user = read_credential("mail_smtp_user")?;
+    config.mail.smtp_password = read_credential("mail_smtp_password")?;
 
     // Setup logging
     if !*LOGGER_INITIALIZED.read()? {
@@ -94,4 +98,18 @@ pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Res
     } else {
         Ok(None)
     }
+}
+
+/// Reads a credential from the file system supported by the credstore and
+/// given from systemd
+///
+/// # Arguments
+///
+/// * 'name' - name of the credential to read
+fn read_credential(name: &str) -> Result<String, MyGridInitError> {
+    let dir = env::var("CREDENTIALS_DIRECTORY")?;
+    let mut p = PathBuf::from(dir);
+    p.push(name);
+    let bytes = fs::read(p)?;
+    Ok(String::from_utf8(bytes)?.trim_end().to_string())
 }
