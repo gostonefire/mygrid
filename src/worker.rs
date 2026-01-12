@@ -169,10 +169,12 @@ fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize) -> Result<Option<Status>
 /// Sets a hold block in the inverter
 ///
 /// The logic for a hold block is a little busy since there is no equivalent in the inverter:
-/// * retrieve the current soc from the invert
-/// * get the lowest of the two values max_min_soc and soc
-///     * charge block may have exceeded it with PV power so soc is too high, in which we use max min soc
-///     * charge block may have not fully reached max soc, in which case we use current soc
+/// * retrieve the current soc from the invert (given through the soc parameter)
+/// * if soc is higher than max min soc, assign max min soc plus half the difference to min soc
+///     * this is done since hold blocks after a use block may have used less energy than expected,
+///       and in fairness we should give half of that surplus to the next use block which may use
+///       more energy than expected.
+/// * if soc is lower than max min soc, assign soc to min soc
 /// * make sure that we are within global limits, i.e. 10-100
 /// * disable any charge block just to make sure that it isn't surviving to the next day
 /// * set the min soc on grid in the inverter
@@ -187,7 +189,11 @@ fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, MyGridWorkerE
     info!("setting hold block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
-    let min_soc = max_min_soc.min(soc).max(10).min(100);
+    let min_soc = if soc > max_min_soc {
+        max_min_soc + (soc - max_min_soc) / 2
+    } else {
+        soc
+    }.clamp(10, 100);
 
     let _ = retry!(||fox.disable_charge_schedule())?;
     let _ = retry!(||fox.set_min_soc_on_grid(min_soc))?;
