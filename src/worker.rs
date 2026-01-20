@@ -8,7 +8,7 @@ use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
-use crate::scheduler::{Block, BlockType, Schedule, Status, BLOCK_UNIT_SIZE};
+use crate::scheduler::{Block, BlockType, FullAt, Schedule, Status, BLOCK_UNIT_SIZE};
 use crate::manual::check_manual;
 
 pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
@@ -43,7 +43,7 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
                 let block: &mut Block = mgr.schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
                 if utc_now - charge_check_done > Duration::minutes(5) {
                     let soc = get_current_soc(&mgr.fox)?;
-                    if let Some(status) = set_full_if_done(&mgr.fox, soc, block.soc_out)? {
+                    if let Some(status) = set_full_if_done(&mgr.fox, soc, block.soc_out, utc_now)? {
                         block.update_block_status(status, None);
                         save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks)?;
                     }
@@ -78,7 +78,7 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
             let soc = get_current_soc(&mgr.fox)?;
             match block.block_type {
                 BlockType::Charge => {
-                    status = set_charge(&mgr.fox, soc, block).map_err(|e| {
+                    status = set_charge(&mgr.fox, soc, block, utc_now).map_err(|e| {
                         MyGridWorkerError(format!("error set charge: {}", e.to_string()))
                     })?;
                 },
@@ -118,7 +118,8 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
 /// * 'fox' - reference to the Fox struct
 /// * 'soc' - current soc
 /// * 'block' - the configuration to use
-fn set_charge(fox: &Fox, soc: u8, block: &Block) -> Result<Status, MyGridWorkerError> {
+/// * 'utc_now' - current utc time
+fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Result<Status, MyGridWorkerError> {
     info!("setting charge block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
@@ -127,7 +128,7 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block) -> Result<Status, MyGridWorkerE
         let _ = retry!(||fox.set_min_soc_on_grid(block.soc_out as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
-        Ok(Status::Full(soc as usize))
+        Ok(Status::Full(FullAt {soc: soc as usize, time: utc_now}))
     } else {
         let _ = retry!(||fox.set_max_soc(block.soc_out as u8))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
@@ -149,10 +150,11 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block) -> Result<Status, MyGridWorkerE
 /// * 'fox' - reference to the Fox struct
 /// * 'soc' - current soc
 /// * 'max_soc' - max soc
-fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize) -> Result<Option<Status>, MyGridWorkerError> {
+/// * 'utc_now' - current utc time
+fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) -> Result<Option<Status>, MyGridWorkerError> {
     if soc as usize >= max_soc {
         info!("setting charge block to full");
-        if is_manual_debug()? {return Ok(Some(Status::Full(soc as usize)))}
+        if is_manual_debug()? {return Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))}
 
         let min_soc = max_soc.max(10).min(100);
 
@@ -160,7 +162,7 @@ fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize) -> Result<Option<Status>
         let _ = retry!(||fox.set_min_soc_on_grid(min_soc as u8))?;
         let _ = retry!(||fox.set_max_soc(100))?;
 
-        Ok(Some(Status::Full(soc as usize)))
+        Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))
     } else {
         Ok(None)
     }

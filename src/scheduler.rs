@@ -35,8 +35,14 @@ impl fmt::Display for BlockType {
 pub enum Status {
     Waiting,
     Started,
-    Full(usize),
+    Full(FullAt),
     Error,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct FullAt {
+    pub time: DateTime<Utc>,
+    pub soc: usize,
 }
 
 /// Implementation of the Display Trait for pretty print
@@ -45,7 +51,7 @@ impl fmt::Display for Status {
         match self {
             Status::Waiting => write!(f, "Waiting  "),
             Status::Started => write!(f, "Started  "),
-            Status::Full(soc) => write!(f, "Full: {:>3}", soc),
+            Status::Full(full_at) => write!(f, "Full: {:>3} {:02}:{:02}", full_at.soc, full_at.time.hour(), full_at.time.minute()),
             Status::Error   => write!(f, "Error    "),
         }
     }
@@ -93,9 +99,9 @@ impl Block {
     ///  * 'soc' - current soc
     pub fn update_block_status(&mut self, status: Status, soc: Option<u8>) {
         if self.block_type == BlockType::Charge {
-            if let Status::Full(soc) = status {
-                self.soc_out = soc;
-                self.charge_out = (soc - 10) as f64 * self.soc_kwh;
+            if let Status::Full(full_at) = &status {
+                self.soc_out = full_at.soc;
+                self.charge_out = (full_at.soc - 10) as f64 * self.soc_kwh;
             }
         }
         self.status = status;
