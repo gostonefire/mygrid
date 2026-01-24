@@ -92,6 +92,11 @@ impl Fox {
     ///
     /// * 'soc' - the new min soc on grid value (10-100)
     pub fn set_max_soc(&self, soc: u8) -> Result<(), FoxError> {
+        // Keep while the problem with the setting of max soc remains
+        // There is still the set_full_if_done check that prevents charging from going higher
+        // than expected. Likely we may not need the set_max_soc setting at all.
+        if soc < 200 { return Ok(())}
+
         let path = "/op/v0/device/setting/set";
 
         let req = SetSoc { sn: self.sn.clone(), key: "MaxSoc".to_string(), value: soc.to_string() };
