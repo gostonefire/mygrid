@@ -9,7 +9,7 @@ use crate::errors::MyGridInitError;
 use crate::logging::setup_logger;
 use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
-use crate::scheduler::{Block, Schedule};
+use crate::scheduler::{ImportSchedule, Schedule};
 
 pub struct Mgr {
     pub fox: Fox,
@@ -58,12 +58,12 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     let time = UtcNow::new(config.general.debug_run_time);
 
     // Load any existing schedule blocks
-    let schedule_blocks = load_schedule_blocks(&config.files.schedule_dir, time.utc_now())?;
+    let import_schedule = load_schedule_blocks(&config.files.schedule_dir, time.utc_now())?;
     
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess);
     let mail = Mail::new(&config.mail)?;
-    let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, schedule_blocks);
+    let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, import_schedule);
 
 
     let mgr = Mgr {
@@ -82,16 +82,16 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
 ///
 /// * 'schedule_dir' - the directory to load the file from
 /// * 'date_time' - datetime object used to check if the loaded schedule blocks are valid for the given day
-pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Result<Option<Vec<Block>>, MyGridInitError> {
+pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Result<Option<ImportSchedule>, MyGridInitError> {
     let file_path = format!("{}schedule.json", schedule_dir);
     let day = date_time.ordinal0();
 
     if Path::new(&file_path).exists() {
         let json = fs::read_to_string(file_path)?;
-        let blocks: Vec<Block> = serde_json::from_str(&json)?;
+        let import_schedule: ImportSchedule = serde_json::from_str(&json)?;
 
-        if blocks.iter().any(|b| b.start_time.ordinal0() == day) {
-            Ok(Some(blocks))
+        if import_schedule.blocks.iter().any(|b| b.start_time.ordinal0() == day) {
+            Ok(Some(import_schedule))
         } else {
             Ok(None)
         }

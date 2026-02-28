@@ -8,7 +8,7 @@ use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
 use crate::initialization::Mgr;
-use crate::scheduler::{Block, BlockType, FullAt, Schedule, Status, BLOCK_UNIT_SIZE};
+use crate::scheduler::{Block, BlockType, FullAt, ImportSchedule, Schedule, Status, BLOCK_UNIT_SIZE};
 use crate::manual::check_manual;
 
 pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
@@ -45,7 +45,7 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
                     let soc = get_current_soc(&mgr.fox)?;
                     if let Some(status) = set_full_if_done(&mgr.fox, soc, block.soc_out, utc_now)? {
                         block.update_block_status(status, None);
-                        save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks)?;
+                        save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks, mgr.schedule.mode_scheduler)?;
                     }
                     charge_check_done = utc_now;
                 }
@@ -98,7 +98,7 @@ pub fn run(config: Config, mgr: &mut Mgr) -> Result<(), MyGridWorkerError> {
             block.update_block_status(status.clone(), Some(soc));
             log_schedule(&mgr.schedule);
 
-            save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks)?;
+            save_schedule_blocks(&config.files.schedule_dir, &mgr.schedule.blocks, mgr.schedule.mode_scheduler)?;
             active_block = Some(block_id);
         }
     }
@@ -251,10 +251,16 @@ fn log_schedule(schedule: &Schedule) {
 ///
 /// * 'schedule_dir' - the directory to save the file to
 /// * 'blocks' - schedule blocks to save
-pub fn save_schedule_blocks(schedule_dir: &str, blocks: &Vec<Block>) -> Result<(), MyGridWorkerError> {
+/// * 'mode_scheduler' - whether to use mode scheduler
+pub fn save_schedule_blocks(schedule_dir: &str, blocks: &Vec<Block>, mode_scheduler: bool) -> Result<(), MyGridWorkerError> {
     let file_path = format!("{}schedule.json", schedule_dir);
 
-    let json = serde_json::to_string_pretty(blocks)?;
+    let import_schedule = ImportSchedule {
+        mode_scheduler,
+        blocks: blocks.clone(),
+    };
+    
+    let json = serde_json::to_string_pretty(&import_schedule)?;
 
     fs::write(file_path, json)?;
 

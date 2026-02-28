@@ -73,6 +73,12 @@ pub struct Block {
     pub status: Status,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ImportSchedule {
+    pub mode_scheduler: bool,
+    pub blocks: Vec<Block>,
+}
+
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -114,6 +120,7 @@ impl Block {
 
 /// Struct representing the block schedule from the current hour and forward
 pub struct Schedule {
+    pub(crate) mode_scheduler: bool,
     schedule_dir: String,
     soc_kwh: f64,
     default_soc_kwh: f64,
@@ -128,12 +135,13 @@ impl Schedule {
     /// * 'schedule_dir' - directory where schedule files are held
     /// * 'default_soc_kwh' - default kWh per soc unit (if no blocks are provided in the first time schedule)
     /// * 'schedule_blocks' - any existing schedule blocks
-    pub fn new(schedule_dir: &str, default_soc_kwh: f64, schedule_blocks: Option<Vec<Block>>) -> Schedule {
+    pub fn new(schedule_dir: &str, default_soc_kwh: f64, schedule_blocks: Option<ImportSchedule>) -> Schedule {
         Schedule {
+            mode_scheduler: schedule_blocks.as_ref().map(|b| b.mode_scheduler).unwrap_or(false),
             schedule_dir: schedule_dir.to_string(),
             soc_kwh: default_soc_kwh,
             default_soc_kwh,
-            blocks: schedule_blocks.unwrap_or(Vec::new()),
+            blocks: schedule_blocks.map(|b| b.blocks).unwrap_or(Vec::new()),
         }
     }
 
@@ -210,8 +218,9 @@ impl Schedule {
 
                     if date_time >= schedule_start && date_time < schedule_end {
                         let json = fs::read_to_string(p).unwrap();
-                        let blocks: Vec<Block> = serde_json::from_str(&json)?;
-                        self.blocks = blocks;
+                        let import_schedule: ImportSchedule = serde_json::from_str(&json)?;
+                        self.blocks = import_schedule.blocks;
+                        self.mode_scheduler = import_schedule.mode_scheduler;
                         self.soc_kwh = self.blocks.last().map(|b| b.soc_kwh).unwrap_or(self.default_soc_kwh);
                         return Ok(());
                     }
