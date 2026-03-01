@@ -1,5 +1,5 @@
+use foxess::FoxError;
 use thiserror::Error;
-use crate::manager_fox_cloud::errors::FoxError;
 use crate::manager_mail::errors::MailError;
 
 
@@ -35,6 +35,9 @@ impl From<std::env::VarError> for MyGridInitError {
 }
 impl From<std::string::FromUtf8Error> for MyGridInitError {
     fn from(e: std::string::FromUtf8Error) -> Self { MyGridInitError(e.to_string()) }
+}
+impl From<FoxError> for MyGridInitError {
+    fn from(e: FoxError) -> Self { MyGridInitError(e.to_string()) }
 }
 
 /// Error depicting errors that occur while running the main program

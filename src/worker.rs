@@ -3,7 +3,9 @@ use std::ops::Add;
 use chrono::{DateTime, Duration, Utc};
 use log::info;
 use anyhow::Result;
-use crate::manager_fox_cloud::Fox;
+use foxess::Fox;
+use foxess::fox_settings::MinSocOnGrid;
+use foxess::fox_variables::SoC;
 use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
 use crate::config::Config;
 use crate::errors::MyGridWorkerError;
@@ -125,12 +127,10 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Resu
 
     if soc >= block.soc_out as u8 {
         let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_min_soc_on_grid(block.soc_out as u8))?;
-        let _ = retry!(||fox.set_max_soc(100))?;
+        let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(block.soc_out as u8))?;
 
         Ok(Status::Full(FullAt {soc: soc as usize, time: utc_now}))
     } else {
-        let _ = retry!(||fox.set_max_soc(block.soc_out as u8))?;
         let _ = retry!(||fox.set_battery_charging_time_schedule(
                         true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE)),
                     ))?;
@@ -159,8 +159,7 @@ fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) 
         let min_soc = max_soc.max(10).min(100);
 
         let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_min_soc_on_grid(min_soc as u8))?;
-        let _ = retry!(||fox.set_max_soc(100))?;
+        let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(min_soc as u8))?;
 
         Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))
     } else {
@@ -198,8 +197,7 @@ fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, MyGridWorkerE
     }.clamp(10, 100);
 
     let _ = retry!(||fox.disable_charge_schedule())?;
-    let _ = retry!(||fox.set_min_soc_on_grid(min_soc))?;
-    let _ = retry!(||fox.set_max_soc(100))?;
+    let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(min_soc))?;
 
     Ok(Status::Started)
 }
@@ -219,8 +217,7 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
     if is_manual_debug()? {return Ok(Status::Started)}
 
     let _ = retry!(||fox.disable_charge_schedule())?;
-    let _ = retry!(||fox.set_min_soc_on_grid(10))?;
-    let _ = retry!(||fox.set_max_soc(100))?;
+    let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(10))?;
 
     Ok(Status::Started)
 }
@@ -231,7 +228,7 @@ fn set_use(fox: &Fox) -> Result<Status, MyGridWorkerError> {
 ///
 /// * 'fox' - reference to the Fox struct
 fn get_current_soc(fox: &Fox) -> Result<u8, MyGridWorkerError> {
-    Ok(retry!(||fox.get_current_soc())?)
+    Ok(retry!(||fox.get_variable_typed::<SoC>())?)
 }
 
 /// Logs a schedule, i.e., its blocks

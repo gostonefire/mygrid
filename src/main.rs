@@ -7,12 +7,10 @@ use crate::initialization::init;
 use crate::manager_mail::Mail;
 use crate::worker::run;
 
-mod models;
 mod macros;
 mod initialization;
 mod worker;
 mod errors;
-mod manager_fox_cloud;
 mod manager_mail;
 mod manual;
 mod config;

@@ -1,18 +1,17 @@
 [package]
 name = "mygrid"
 version = "3.1.7"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-md-5 = "0.10.6"
 chrono = {  version = "0.4", features = ["serde"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-ureq = "3.1"
-toml = "0.9"
+toml = "1.0"
 glob = "0.3"
 lettre = "0.11"
 log4rs = "1.4"
 log = "0.4"
 thiserror = "2.0"
 anyhow = "1.0"
+foxess = { version = "0.2", default-features = false, features = ["blocking"] }

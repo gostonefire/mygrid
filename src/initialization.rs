@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, Utc};
 use log::info;
 use anyhow::Result;
+use foxess::Fox;
 use crate::{UtcNow, DEBUG_MODE, LOGGER_INITIALIZED};
 use crate::config::{load_config, Config};
 use crate::errors::MyGridInitError;
 use crate::logging::setup_logger;
-use crate::manager_fox_cloud::Fox;
 use crate::manager_mail::Mail;
 use crate::scheduler::{ImportSchedule, Schedule};
 
@@ -61,7 +61,7 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     let import_schedule = load_schedule_blocks(&config.files.schedule_dir, time.utc_now())?;
     
     // Instantiate structs
-    let fox = Fox::new(&config.fox_ess);
+    let fox = Fox::new(&config.fox_ess.api_key, &config.fox_ess.inverter_sn, 30)?;
     let mail = Mail::new(&config.mail)?;
     let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, import_schedule);
 
