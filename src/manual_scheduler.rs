@@ -1,12 +1,11 @@
-use std::{fmt, fs};
+use std::fmt;
 use std::fmt::Formatter;
 use std::ops::Add;
-use std::path::PathBuf;
-use chrono::{DateTime, DurationRound, NaiveDateTime, TimeDelta, Timelike, Utc};
-use log::warn;
+use chrono::{DateTime, DurationRound, TimeDelta, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use crate::errors::SchedulingError;
+use crate::manager_files::get_schedule_for_date;
 
 /// Size of the smallest block possible in minutes
 pub const BLOCK_UNIT_SIZE: i64 = 15;
@@ -73,9 +72,10 @@ pub struct Block {
     pub status: Status,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ImportSchedule {
     pub mode_scheduler: bool,
+    pub soc_kwh: f64,
     pub blocks: Vec<Block>,
 }
 
@@ -120,10 +120,8 @@ impl Block {
 
 /// Struct representing the block schedule from the current hour and forward
 pub struct Schedule {
-    pub(crate) mode_scheduler: bool,
     schedule_dir: String,
-    soc_kwh: f64,
-    default_soc_kwh: f64,
+    pub(crate) soc_kwh: f64,
     pub blocks: Vec<Block>,
 }
 
@@ -137,10 +135,8 @@ impl Schedule {
     /// * 'schedule_blocks' - any existing schedule blocks
     pub fn new(schedule_dir: &str, default_soc_kwh: f64, schedule_blocks: Option<ImportSchedule>) -> Schedule {
         Schedule {
-            mode_scheduler: schedule_blocks.as_ref().map(|b| b.mode_scheduler).unwrap_or(false),
             schedule_dir: schedule_dir.to_string(),
-            soc_kwh: default_soc_kwh,
-            default_soc_kwh,
+            soc_kwh: schedule_blocks.as_ref().map(|b| b.soc_kwh).unwrap_or(default_soc_kwh),
             blocks: schedule_blocks.map(|b| b.blocks).unwrap_or(Vec::new()),
         }
     }
@@ -208,49 +204,18 @@ impl Schedule {
     ///
     /// # Arguments
     ///
-    /// * 'date_time' - the date time to stamp on the schedule
-    pub fn update_scheduling(&mut self, date_time: DateTime<Utc>) -> Result<(), SchedulingError> {
-        let path = format!("{}*_schedule.json", self.schedule_dir);
-        for entry in glob::glob(&path)? {
-            match entry {
-                Ok(p) => {
-                    let (schedule_start, schedule_end) = get_schedule_time(&p)?;
-
-                    if date_time >= schedule_start && date_time < schedule_end {
-                        let json = fs::read_to_string(p).unwrap();
-                        let import_schedule: ImportSchedule = serde_json::from_str(&json)?;
-                        self.blocks = import_schedule.blocks;
-                        self.mode_scheduler = import_schedule.mode_scheduler;
-                        self.soc_kwh = self.blocks.last().map(|b| b.soc_kwh).unwrap_or(self.default_soc_kwh);
-                        return Ok(());
-                    }
-                }
-                Err(e) => warn!("{:?}", e),
+    /// * 'date_time' - the date time the schedule needs to include
+    pub fn update_scheduling(&mut self, date_time: DateTime<Utc>) -> Result<Option<ImportSchedule>, SchedulingError> {
+        if let Some(import_schedule) = get_schedule_for_date(&self.schedule_dir, date_time)?
+        {
+            if import_schedule.mode_scheduler{
+                return Ok(Some(import_schedule));
             }
+            self.blocks = import_schedule.blocks;
+            self.soc_kwh = import_schedule.soc_kwh;
         }
-        
-        Ok(())
-    }
-}
 
-/// Returns the date time representation of the schedule start time which is 
-/// encoded in the schedule file name
-/// 
-/// # Arguments
-/// 
-/// * 'path_buf' - the full path to the schedule file
-fn get_schedule_time(path_buf: &PathBuf) -> Result<(DateTime<Utc>, DateTime<Utc>), SchedulingError> {
-    let file_name = path_buf.file_name()
-        .ok_or("Error in schedule file name")?
-        .to_str()
-        .ok_or("Illegal character in schedule file name")?;
-    
-    if file_name.len() != 39 {
-        Err("malformed schedule file name")?
-    } else {
-        let start = NaiveDateTime::parse_from_str(&file_name[0..12], "%Y%m%d%H%M")?.and_utc();
-        let end = NaiveDateTime::parse_from_str(&file_name[13..25], "%Y%m%d%H%M")?.and_utc();
-        Ok((start, end))
+        Ok(None)
     }
 }
 

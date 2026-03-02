@@ -3,19 +3,25 @@ use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 use log::error;
-use crate::initialization::init;
+use crate::config::Config;
+use crate::errors::WorkerError;
+use crate::initialization::{init, Mgr};
 use crate::manager_mail::Mail;
-use crate::worker::run;
+use crate::manual_worker::run_manual_scheduler;
+use crate::mode_worker::run_mode_scheduler;
 
 mod macros;
 mod initialization;
-mod worker;
+mod manual_worker;
 mod errors;
 mod manager_mail;
 mod manual;
 mod config;
 mod logging;
-mod scheduler;
+mod manual_scheduler;
+mod mode_scheduler;
+mod manager_files;
+mod mode_worker;
 
 /// Debug mode means no write operations to inverter (except time)
 static DEBUG_MODE: RwLock<bool> = RwLock::new(false);
@@ -38,13 +44,40 @@ fn main() {
             }
         };
 
-        match run(config, &mut mgr) {
+        match working_mode_switch(&config, &mut mgr) {
             Ok(()) => return,
             Err(e) => {
                 error!("{}", e);
                 (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mgr.mail));
             }
         }
+    }
+}
+
+/// The work mode switch that given whatever work mode a schedule has been produced for
+/// chooses the correct implementation. If no schedule has been produced, it defaults to manual mode.
+///
+/// Any worker that gracefully returns with a schedule is supposed to have decided that the schedule
+/// is intended for the other worker. E.g. if the manual worker picks up the next available schedule,
+/// and it is marked as for the mode scheduler, the schedule is returned to this switch for re-assignment.
+///
+/// # Arguments
+///
+/// * 'config' - The configuration for the workers
+/// * 'mgr' - The manager for the workers
+fn working_mode_switch(config: &Config, mut mgr: &mut Mgr) -> Result<(), WorkerError> {
+    loop {
+        let mode_scheduler = mgr.import_schedule
+            .as_ref()
+            .map(|s| s.mode_scheduler)
+            .unwrap_or(false);
+        
+        if !mode_scheduler {
+            mgr.import_schedule = run_manual_scheduler(config, &mut mgr)?;
+        } else {
+            mgr.import_schedule = run_mode_scheduler(config, &mut mgr)?;
+        };
+        
     }
 }
 

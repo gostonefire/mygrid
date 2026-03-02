@@ -1,6 +1,5 @@
 use std::{env, fs};
-use std::path::{Path, PathBuf};
-use chrono::{DateTime, Datelike, Utc};
+use std::path::PathBuf;
 use log::info;
 use anyhow::Result;
 use foxess::Fox;
@@ -8,13 +7,14 @@ use crate::{UtcNow, DEBUG_MODE, LOGGER_INITIALIZED};
 use crate::config::{load_config, Config};
 use crate::errors::MyGridInitError;
 use crate::logging::setup_logger;
+use crate::manager_files::{get_schedule_for_date, load_scheduled_blocks};
 use crate::manager_mail::Mail;
-use crate::scheduler::{ImportSchedule, Schedule};
+use crate::manual_scheduler::ImportSchedule;
 
 pub struct Mgr {
     pub fox: Fox,
     pub mail: Mail,
-    pub schedule: Schedule,
+    pub import_schedule: Option<ImportSchedule>,
     pub time: UtcNow,
 }
 
@@ -58,47 +58,25 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     let time = UtcNow::new(config.general.debug_run_time);
 
     // Load any existing schedule blocks
-    let import_schedule = load_schedule_blocks(&config.files.schedule_dir, time.utc_now())?;
-    
+    let import_schedule = load_scheduled_blocks(&config.files.schedule_dir, time.utc_now())?
+        .or(get_schedule_for_date(&config.files.schedule_dir, time.utc_now())?);
+
+
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess.api_key, &config.fox_ess.inverter_sn, 30)?;
     let mail = Mail::new(&config.mail)?;
-    let schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, import_schedule);
 
 
     let mgr = Mgr {
         fox,
         mail,
-        schedule,
+        import_schedule,
         time,
     };
  
     Ok((config, mgr))
 }
 
-/// Loads scheduled blocks from file
-///
-/// # Arguments
-///
-/// * 'schedule_dir' - the directory to load the file from
-/// * 'date_time' - datetime object used to check if the loaded schedule blocks are valid for the given day
-pub fn load_schedule_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Result<Option<ImportSchedule>, MyGridInitError> {
-    let file_path = format!("{}schedule.json", schedule_dir);
-    let day = date_time.ordinal0();
-
-    if Path::new(&file_path).exists() {
-        let json = fs::read_to_string(file_path)?;
-        let import_schedule: ImportSchedule = serde_json::from_str(&json)?;
-
-        if import_schedule.blocks.iter().any(|b| b.start_time.ordinal0() == day) {
-            Ok(Some(import_schedule))
-        } else {
-            Ok(None)
-        }
-    } else {
-        Ok(None)
-    }
-}
 
 /// Reads a credential from the file system supported by the credstore and
 /// given from systemd
