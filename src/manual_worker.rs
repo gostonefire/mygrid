@@ -1,21 +1,23 @@
-use std::thread;
 use std::ops::Add;
+use std::thread;
 use chrono::{DateTime, Duration, Utc};
 use log::info;
 use anyhow::Result;
 use foxess::Fox;
 use foxess::fox_settings::MinSocOnGrid;
 use foxess::fox_variables::SoC;
-use crate::{retry, wrapper, DEBUG_MODE, MANUAL_DAY};
+use crate::retry;
+use crate::worker_common::{import_schedule, is_manual_debug, Block, BlockType, FullAt, Status, WorkerError, BLOCK_UNIT_SIZE};
 use crate::config::Config;
-use crate::errors::ManualWorkerError;
 use crate::initialization::Mgr;
 use crate::manager_files::save_scheduled_blocks;
-use crate::manual_scheduler::{Block, BlockType, FullAt, ImportSchedule, Schedule, Status, BLOCK_UNIT_SIZE};
+use crate::manual_scheduler::Schedule;
 use crate::manual::check_manual;
 
-pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<Option<ImportSchedule>, ManualWorkerError> {
-    let mut schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, mgr.import_schedule.clone());
+pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerError> {
+    let loaded_schedule = import_schedule(&config.files.schedule_dir, mgr.time.utc_now(), false)?;
+    
+    let mut schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, loaded_schedule);
 
     let mut charge_check_done: DateTime<Utc> = DateTime::default();
     let mut utc_now: DateTime<Utc> = mgr.time.utc_now();
@@ -44,12 +46,12 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<Option<Imp
         if let Some(block_id) = active_block {
             if schedule.is_active_charging(block_id, utc_now)
             {
-                let block: &mut Block = schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
+                let block: &mut Block = schedule.get_block_by_id(block_id).ok_or(WorkerError::Other("Active block not found"))?;
                 if utc_now - charge_check_done > Duration::minutes(5) {
                     let soc = get_current_soc(&mgr.fox)?;
                     if let Some(status) = set_full_if_done(&mgr.fox, soc, block.soc_out, utc_now)? {
                         block.update_block_status(status, None);
-                        save_scheduled_blocks(&config.files.schedule_dir, &schedule.blocks, schedule.soc_kwh, false)?;
+                        save_scheduled_blocks(&config.files.schedule_dir, &schedule.blocks, schedule.soc_kwh, false, schedule.schedule_id)?;
                     }
                     charge_check_done = utc_now;
                 }
@@ -67,7 +69,7 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<Option<Imp
                 // loop until successful.
                 // If update scheduling returns a mode schedule, we return it
                 if let Some(import_schedule) =schedule.update_scheduling(utc_now)? && import_schedule.mode_scheduler {
-                    return Ok(Some(import_schedule));
+                    return Err(WorkerError::IsModeSchedule);
                 }
 
                 let block_id = schedule.get_block_by_time(utc_now, true)
@@ -80,33 +82,33 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<Option<Imp
                 block_id
             };
 
-            let block: &mut Block = schedule.get_block_by_id(block_id).ok_or("Active block not found")?;
+            let block: &mut Block = schedule.get_block_by_id(block_id).ok_or(WorkerError::Other("Active block not found"))?;
 
             let status: Status;
             let soc = get_current_soc(&mgr.fox)?;
             match block.block_type {
                 BlockType::Charge => {
                     status = set_charge(&mgr.fox, soc, block, utc_now).map_err(|e| {
-                        ManualWorkerError(format!("error set charge: {}", e.to_string()))
+                        WorkerError::SetCharge(e.to_string())
                     })?;
                 },
 
                 BlockType::Hold => {
                     status = set_hold(&mgr.fox, soc, block.soc_in as u8).map_err(|e| {
-                        ManualWorkerError(format!("error set hold: {}", e.to_string()))
+                        WorkerError::SetHold(e.to_string())
                     })?;
                 },
 
                 BlockType::Use => {
                     status = set_use(&mgr.fox).map_err(|e| {
-                        ManualWorkerError(format!("error set use: {}", e.to_string()))
+                        WorkerError::SetUse(e.to_string())
                     })?;
                 },
             }
             block.update_block_status(status.clone(), Some(soc));
             log_schedule(&schedule);
 
-            save_scheduled_blocks(&config.files.schedule_dir, &schedule.blocks, schedule.soc_kwh, false)?;
+            save_scheduled_blocks(&config.files.schedule_dir, &schedule.blocks, schedule.soc_kwh, false, schedule.schedule_id)?;
             active_block = Some(block_id);
         }
     }
@@ -127,19 +129,26 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<Option<Imp
 /// * 'soc' - current soc
 /// * 'block' - the configuration to use
 /// * 'utc_now' - current utc time
-fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Result<Status, ManualWorkerError> {
+fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Result<Status, WorkerError> {
     info!("setting charge block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
     if soc >= block.soc_out as u8 {
-        let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(block.soc_out as u8))?;
+        let _ = retry!(
+            "disable_charge_schedule",
+            ||fox.disable_charge_schedule()
+        )?;
+        let _ = retry!(
+            "set_setting_typed::<MinSocOnGrid>",
+            ||fox.set_setting_typed::<MinSocOnGrid>(block.soc_out as u8)
+        )?;
 
         Ok(Status::Full(FullAt {soc: soc as usize, time: utc_now}))
     } else {
-        let _ = retry!(||fox.set_battery_charging_time_schedule(
-                        true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE)),
-                    ))?;
+        let _ = retry!(
+            "set_battery_charging_time_schedule",
+            ||fox.set_battery_charging_time_schedule(true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE)))
+        )?;
 
         Ok(Status::Started)
     }
@@ -157,15 +166,21 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Resu
 /// * 'soc' - current soc
 /// * 'max_soc' - max soc
 /// * 'utc_now' - current utc time
-fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) -> Result<Option<Status>, ManualWorkerError> {
+fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) -> Result<Option<Status>, WorkerError> {
     if soc as usize >= max_soc {
         info!("setting charge block to full");
         if is_manual_debug()? {return Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))}
 
         let min_soc = max_soc.max(10).min(100);
 
-        let _ = retry!(||fox.disable_charge_schedule())?;
-        let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(min_soc as u8))?;
+        let _ = retry!(
+            "disable_charge_schedule",
+            ||fox.disable_charge_schedule()
+        )?;
+        let _ = retry!(
+            "set_setting_typed::<MinSocOnGrid>",
+            ||fox.set_setting_typed::<MinSocOnGrid>(min_soc as u8)
+        )?;
 
         Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))
     } else {
@@ -192,7 +207,7 @@ fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) 
 /// * 'fox' - reference to the Fox struct
 /// * 'soc' - current soc
 /// * 'max_min_soc' - max min soc allowed for the block
-fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, ManualWorkerError> {
+fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, WorkerError> {
     info!("setting hold block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
@@ -202,8 +217,14 @@ fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, ManualWorkerE
         soc
     }.clamp(10, 100);
 
-    let _ = retry!(||fox.disable_charge_schedule())?;
-    let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(min_soc))?;
+    let _ = retry!(
+        "disable_charge_schedule",
+        ||fox.disable_charge_schedule()
+    )?;
+    let _ = retry!(
+        "set_setting_typed::<MinSocOnGrid>",
+        ||fox.set_setting_typed::<MinSocOnGrid>(min_soc)
+    )?;
 
     Ok(Status::Started)
 }
@@ -218,12 +239,18 @@ fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, ManualWorkerE
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-fn set_use(fox: &Fox) -> Result<Status, ManualWorkerError> {
+fn set_use(fox: &Fox) -> Result<Status, WorkerError> {
     info!("setting use block");
     if is_manual_debug()? {return Ok(Status::Started)}
 
-    let _ = retry!(||fox.disable_charge_schedule())?;
-    let _ = retry!(||fox.set_setting_typed::<MinSocOnGrid>(10))?;
+    let _ = retry!(
+        "disable_charge_schedule",
+        ||fox.disable_charge_schedule()
+    )?;
+    let _ = retry!(
+        "set_setting_typed::<MinSocOnGrid>",
+        ||fox.set_setting_typed::<MinSocOnGrid>(10)
+    )?;
 
     Ok(Status::Started)
 }
@@ -233,8 +260,11 @@ fn set_use(fox: &Fox) -> Result<Status, ManualWorkerError> {
 /// # Arguments
 ///
 /// * 'fox' - reference to the Fox struct
-fn get_current_soc(fox: &Fox) -> Result<u8, ManualWorkerError> {
-    Ok(retry!(||fox.get_variable_typed::<SoC>())?)
+fn get_current_soc(fox: &Fox) -> Result<u8, WorkerError> {
+    Ok(retry!(
+        "get_variable_typed::<SoC>",
+        ||fox.get_variable_typed::<SoC>()
+    )?)
 }
 
 /// Logs a schedule, i.e., its blocks
@@ -248,12 +278,3 @@ fn log_schedule(schedule: &Schedule) {
     }
 }
 
-/// Check if we are in debug mode or manual day
-///
-fn is_manual_debug() -> Result<bool, ManualWorkerError> {
-    if *DEBUG_MODE.read()? || *MANUAL_DAY.read()? {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
-}

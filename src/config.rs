@@ -3,7 +3,7 @@ use log::LevelFilter;
 use serde::Deserialize;
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use crate::errors::ConfigError;
+use thiserror::Error;
 
 #[derive(Deserialize)]
 pub struct Charge {
@@ -64,4 +64,12 @@ pub fn load_config(config_path: &str) -> Result<Config, ConfigError> {
     let config: Config = toml::from_str(&toml)?;
     
     Ok(config)
+}
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("error while loading configuration: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("error while parsing configuration: {0}")]
+    TomlError(#[from] toml::de::Error),    
 }

@@ -2,9 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, NaiveDateTime, Utc};
 use log::warn;
-use anyhow::Result;
-use crate::errors::FileManagerError;
-use crate::manual_scheduler::{Block, ImportSchedule};
+use thiserror::Error;
+use crate::worker_common::{Block, ImportSchedule};
 
 /// Gets schedule (if any) for a given date time
 ///
@@ -61,13 +60,15 @@ pub fn load_scheduled_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Re
 /// * 'schedule_dir' - the directory to save the file to
 /// * 'blocks' - schedule blocks to save
 /// * 'mode_scheduler' - whether to use mode scheduler
-pub fn save_scheduled_blocks(schedule_dir: &str, blocks: &Vec<Block>, soc_kwh: f64, mode_scheduler: bool) -> Result<(), FileManagerError> {
+/// * 'schedule_id' - id of the schedule, shall refer to the original schedule from the mygrid scheduler
+pub fn save_scheduled_blocks(schedule_dir: &str, blocks: &Vec<Block>, soc_kwh: f64, mode_scheduler: bool, schedule_id: i64) -> Result<(), FileManagerError> {
     let file_path = format!("{}schedule.json", schedule_dir);
 
     let import_schedule = ImportSchedule {
         mode_scheduler,
         soc_kwh,
         blocks: blocks.clone(),
+        schedule_id,
     };
 
     let json = serde_json::to_string_pretty(&import_schedule)?;
@@ -85,15 +86,30 @@ pub fn save_scheduled_blocks(schedule_dir: &str, blocks: &Vec<Block>, soc_kwh: f
 /// * 'path_buf' - the full path to the schedule file
 fn get_schedule_time(path_buf: &PathBuf) -> anyhow::Result<(DateTime<Utc>, DateTime<Utc>), FileManagerError> {
     let file_name = path_buf.file_name()
-        .ok_or("Error in schedule file name")?
+        .ok_or(FileManagerError::Other("error in schedule file name".to_string()))?
         .to_str()
-        .ok_or("Illegal character in schedule file name")?;
+        .ok_or(FileManagerError::Other("illegal character in schedule file name".to_string()))?;
 
     if file_name.len() != 39 {
-        Err("malformed schedule file name")?
+        Err(FileManagerError::Other("malformed schedule file name".to_string()))?
     } else {
         let start = NaiveDateTime::parse_from_str(&file_name[0..12], "%Y%m%d%H%M")?.and_utc();
         let end = NaiveDateTime::parse_from_str(&file_name[13..25], "%Y%m%d%H%M")?.and_utc();
         Ok((start, end))
     }
+}
+
+#[derive(Error, Debug)]
+#[error("error while managing file operations: {0}")]
+pub enum FileManagerError {
+    #[error("error while reading/writing file: {0}")]
+    IO(#[from] std::io::Error),
+    #[error("error while parsing JSON: {0}")]
+    JSON(#[from] serde_json::Error),
+    #[error("error while parsing glob pattern: {0}")]
+    GLOB(#[from] glob::PatternError),
+    #[error("error while parsing date: {0}")]
+    DATE(#[from] chrono::format::ParseError),
+    #[error("other error: {0}")]
+    Other(String),
 }

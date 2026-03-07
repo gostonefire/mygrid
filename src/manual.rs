@@ -1,8 +1,7 @@
 use std::path::Path;
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::Deserialize;
-use anyhow::Result;
-use crate::errors::SkipError;
+use thiserror::Error;
 use crate::MANUAL_DAY;
 
 #[derive(Deserialize)]
@@ -21,8 +20,8 @@ struct ManualDates {
 ///
 /// * 'manual_file' - the file holding any dates indicating going manual
 /// * 'date' - date to check if to set manual mode
-pub fn check_manual(manual_file: &str, date: DateTime<Utc>) -> Result<Option<bool>, SkipError> {
-    let was_manual = *MANUAL_DAY.read()?;
+pub fn check_manual(manual_file: &str, date: DateTime<Utc>) -> Result<Option<bool>, ManualDaysError> {
+    let was_manual = *MANUAL_DAY.read().map_err(|e| ManualDaysError::LockPoisonRead(e.to_string()))?;
 
     let path = Path::new(manual_file);
     if path.exists() {
@@ -31,11 +30,24 @@ pub fn check_manual(manual_file: &str, date: DateTime<Utc>) -> Result<Option<boo
         let manual: ManualDates = serde_json::from_str(&json)?;
 
         if manual.dates.contains(&date) {
-            *MANUAL_DAY.write()? = true;
+            *MANUAL_DAY.write().map_err(|e| ManualDaysError::LockPoisonWrite(e.to_string()))? = true;
             return if !was_manual { Ok(Some(true)) } else { Ok(None) }
         }
     }
 
-    *MANUAL_DAY.write()? = false;
+    *MANUAL_DAY.write().map_err(|e| ManualDaysError::LockPoisonWrite(e.to_string()))? = false;
     if was_manual { Ok(Some(false)) } else { Ok(None) }
+}
+
+#[derive(Error, Debug)]
+#[error("error while managing manual days: {0}")]
+pub enum ManualDaysError {
+    #[error("lock poison error: {0}")]
+    LockPoisonRead(String),
+    #[error("lock poison error: {0}")]
+    LockPoisonWrite(String),
+    #[error("error while reading manual file: {0}")]
+    JSON(#[from] serde_json::Error),
+    #[error("error while reading manual file: {0}")]
+    IO(#[from] std::io::Error),
 }

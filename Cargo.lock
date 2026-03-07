@@ -356,9 +356,9 @@ dependencies = [
 
 [[package]]
 name = "foxess"
-version = "0.2.5"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc4984d5d7e02b72f747d406f31761557bfe099f94c66a0f3ca16a3c35df5442"
+checksum = "6695d3f29e466d21afda27b026ab233fa483a20add4b18275a35631dbd7edccc"
 dependencies = [
  "chrono",
  "md-5",

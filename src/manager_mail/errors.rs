@@ -2,14 +2,11 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[error("error in communication with mail provider cloud: {0}")]
-pub struct MailError(pub String);
-
-impl From<lettre::transport::smtp::Error> for MailError {
-    fn from(e: lettre::transport::smtp::Error) -> Self { MailError(e.to_string()) }
-}
-impl From<lettre::address::AddressError> for MailError {
-    fn from(e: lettre::address::AddressError) -> Self { MailError(e.to_string()) }
-}
-impl From<lettre::error::Error> for MailError {
-    fn from(e: lettre::error::Error) -> Self { MailError(e.to_string()) }
+pub enum MailError {
+    #[error("error in address: {0}")]
+    Address(#[from] lettre::address::AddressError),
+    #[error("error in transport: {0}")]
+    Transport(#[from] lettre::transport::smtp::Error),
+    #[error("error in message builder: {0}")]
+    MessageBuilder(#[from] lettre::error::Error),
 }

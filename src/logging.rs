@@ -3,8 +3,7 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use log::LevelFilter;
-use anyhow::Result;
-use crate::errors::LoggingError;
+use thiserror::Error;
 
 /// Sets up the logger
 ///
@@ -41,4 +40,15 @@ pub fn setup_logger(log_path: &str, log_level: LevelFilter, log_to_stdout: bool)
     let _ = log4rs::init_config(config)?;
 
     Ok(())
+}
+
+#[derive(Error, Debug)]
+#[error("error while setting up logging: {0}")]
+pub enum LoggingError {
+    #[error("error while setting up logging: {0}")]
+    Config(#[from] log4rs::config::runtime::ConfigErrors),
+    #[error("error while setting up logging: {0}")]
+    SetLogger(#[from] log::SetLoggerError),
+    #[error("error while setting up logging: {0}")]
+    IO(#[from] std::io::Error),
 }

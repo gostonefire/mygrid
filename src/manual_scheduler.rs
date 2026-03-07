@@ -1,127 +1,13 @@
-use std::fmt;
-use std::fmt::Formatter;
-use std::ops::Add;
-use chrono::{DateTime, DurationRound, TimeDelta, Timelike, Utc};
-use serde::{Deserialize, Serialize};
-use anyhow::Result;
-use crate::errors::SchedulingError;
+use chrono::{DateTime, DurationRound, TimeDelta, Utc};
+use crate::worker_common::{Block, BlockType, ImportSchedule, Status, BLOCK_UNIT_SIZE};
 use crate::manager_files::get_schedule_for_date;
-
-/// Size of the smallest block possible in minutes
-pub const BLOCK_UNIT_SIZE: i64 = 15;
-
-/// Available block types
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub enum BlockType {
-    Charge,
-    Hold,
-    Use,
-}
-
-/// Implementation of the Display Trait for pretty print
-impl fmt::Display for BlockType {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            BlockType::Charge => write!(f, "Charge"),
-            BlockType::Hold   => write!(f, "Hold  "),
-            BlockType::Use    => write!(f, "Use   "),
-        }
-    }
-}
-
-/// Block status
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub enum Status {
-    Waiting,
-    Started,
-    Full(FullAt),
-    Error,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct FullAt {
-    pub time: DateTime<Utc>,
-    pub soc: usize,
-}
-
-/// Implementation of the Display Trait for pretty print
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Status::Waiting => write!(f, "Waiting  "),
-            Status::Started => write!(f, "Started  "),
-            Status::Full(full_at) => write!(f, "Full: {:>3} {:02}:{:02}", full_at.soc, full_at.time.hour(), full_at.time.minute()),
-            Status::Error   => write!(f, "Error    "),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Block {
-    block_id: usize,
-    pub block_type: BlockType,
-    pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
-    pub cost: f64,
-    pub charge_in: f64,
-    pub charge_out: f64,
-    pub true_soc_in: Option<usize>,
-    pub soc_in: usize,
-    pub soc_out: usize,
-    soc_kwh: f64,
-    pub status: Status,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ImportSchedule {
-    pub mode_scheduler: bool,
-    pub soc_kwh: f64,
-    pub blocks: Vec<Block>,
-}
-
-/// Implementation of the Display Trait for pretty print
-impl fmt::Display for Block {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let length = self.end_time.add(TimeDelta::minutes(BLOCK_UNIT_SIZE)) - self.start_time;
-
-        // Build base output
-        let output = format!("{} -> {:>02}:{:>02} - Length: {:>02}:{:>02}: SocIn {:>3}, SocOut {:>3}, True SocIn: {:>3}, Cost {:>5.2} ",
-                             self.block_type,
-                             self.start_time.hour(), self.start_time.minute(),
-                             length.num_hours(), length.num_minutes() - length.num_hours() * 60,
-                             self.soc_in, self.soc_out,
-                             self.true_soc_in.unwrap_or(0), self.cost);
-
-        write!(f, "{}", output)
-    }
-}
-
-impl Block {
-    /// Updates the status of the block
-    ///
-    /// # Arguments
-    ///
-    /// * 'status' - the status to update with
-    ///  * 'soc' - current soc
-    pub fn update_block_status(&mut self, status: Status, soc: Option<u8>) {
-        if self.block_type == BlockType::Charge {
-            if let Status::Full(full_at) = &status {
-                self.soc_out = full_at.soc;
-                self.charge_out = (full_at.soc - 10) as f64 * self.soc_kwh;
-            }
-        }
-        self.status = status;
-        if let Some(soc) = soc {
-            self.true_soc_in = Some(soc as usize);
-        }
-    }
-}
-
+use crate::scheduler_common::SchedulingError;
 
 /// Struct representing the block schedule from the current hour and forward
 pub struct Schedule {
     schedule_dir: String,
-    pub(crate) soc_kwh: f64,
+    pub soc_kwh: f64,
+    pub schedule_id: i64,
     pub blocks: Vec<Block>,
 }
 
@@ -137,6 +23,7 @@ impl Schedule {
         Schedule {
             schedule_dir: schedule_dir.to_string(),
             soc_kwh: schedule_blocks.as_ref().map(|b| b.soc_kwh).unwrap_or(default_soc_kwh),
+            schedule_id: schedule_blocks.as_ref().map(|b| b.schedule_id).unwrap_or(0),
             blocks: schedule_blocks.map(|b| b.blocks).unwrap_or(Vec::new()),
         }
     }
@@ -213,6 +100,7 @@ impl Schedule {
             }
             self.blocks = import_schedule.blocks;
             self.soc_kwh = import_schedule.soc_kwh;
+            self.schedule_id = import_schedule.schedule_id;
         }
 
         Ok(None)

@@ -1,20 +1,17 @@
 use std::{env, fs};
 use std::path::PathBuf;
 use log::info;
-use anyhow::Result;
-use foxess::Fox;
+use foxess::{Fox, FoxError};
+use thiserror::Error;
 use crate::{UtcNow, DEBUG_MODE, LOGGER_INITIALIZED};
-use crate::config::{load_config, Config};
-use crate::errors::MyGridInitError;
-use crate::logging::setup_logger;
-use crate::manager_files::{get_schedule_for_date, load_scheduled_blocks};
+use crate::config::{load_config, Config, ConfigError};
+use crate::logging::{setup_logger, LoggingError};
+use crate::manager_mail::errors::MailError;
 use crate::manager_mail::Mail;
-use crate::manual_scheduler::ImportSchedule;
 
 pub struct Mgr {
     pub fox: Fox,
     pub mail: Mail,
-    pub import_schedule: Option<ImportSchedule>,
     pub time: UtcNow,
 }
 
@@ -40,27 +37,22 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     config.mail.smtp_password = read_credential("mail_smtp_password")?;
 
     // Setup logging
-    if !*LOGGER_INITIALIZED.read()? {
+    if !*LOGGER_INITIALIZED.read().map_err(|e| MyGridInitError::LockPoisonRead(e.to_string()))? {
         let _ = setup_logger(&config.general.log_path, config.general.log_level, config.general.log_to_stdout)?;
     }
-    *LOGGER_INITIALIZED.write()? = true;
+    *LOGGER_INITIALIZED.write().map_err(|e| MyGridInitError::LockPoisonWrite(e.to_string()))? = true;
 
     // Print version
     info!("mygrid version: {}", env!("CARGO_PKG_VERSION"));
 
     // Set debug mode on/off
-    *DEBUG_MODE.write()? = config.general.debug_mode;
-    if *DEBUG_MODE.read()? {
+    *DEBUG_MODE.write().map_err(|e| MyGridInitError::LockPoisonWrite(e.to_string()))? = config.general.debug_mode;
+    if *DEBUG_MODE.read().map_err(|e| MyGridInitError::LockPoisonRead(e.to_string()))? {
         info!("running in Debug Mode!!");
     }
 
     // Instantiate time object
     let time = UtcNow::new(config.general.debug_run_time);
-
-    // Load any existing schedule blocks
-    let import_schedule = load_scheduled_blocks(&config.files.schedule_dir, time.utc_now())?
-        .or(get_schedule_for_date(&config.files.schedule_dir, time.utc_now())?);
-
 
     // Instantiate structs
     let fox = Fox::new(&config.fox_ess.api_key, &config.fox_ess.inverter_sn, 30)?;
@@ -70,7 +62,6 @@ pub fn init() -> Result<(Config, Mgr), MyGridInitError> {
     let mgr = Mgr {
         fox,
         mail,
-        import_schedule,
         time,
     };
  
@@ -90,4 +81,26 @@ fn read_credential(name: &str) -> Result<String, MyGridInitError> {
     p.push(name);
     let bytes = fs::read(p)?;
     Ok(String::from_utf8(bytes)?.trim_end().to_string())
+}
+
+#[derive(Error, Debug)]
+pub enum MyGridInitError {
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Logger(#[from] LoggingError),
+    #[error(transparent)]
+    Mailer(#[from] MailError),
+    #[error("lock poison error: {0}")]
+    LockPoisonRead(String),
+    #[error("lock poison error: {0}")]
+    LockPoisonWrite(String),
+    #[error(transparent)]
+    FoxESS(#[from] FoxError),
+    #[error("error while reading credential: {0}")]
+    ReadCredentialIO(#[from] std::io::Error),
+    #[error("error while reading credential: {0}")]
+    ReadCredentialEnv(#[from] env::VarError),
+    #[error("error while reading credential: {0}")]
+    ReadCredentialUtf8(#[from] std::string::FromUtf8Error),
 }
