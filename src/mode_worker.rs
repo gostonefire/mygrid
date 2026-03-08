@@ -5,6 +5,7 @@ use log::{error, info};
 use anyhow::Result;
 use chrono::Duration;
 use foxess::fox_settings::WorkMode;
+use foxess::fox_variables::SoC;
 use crate::retry;
 use crate::config::Config;
 use crate::worker_common::{import_schedule, is_manual_debug, WorkerError, Status};
@@ -39,7 +40,9 @@ pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerEr
             if let Some(status) = s.get_current_schedule_status(&mgr.mail, instant) {
                 if status == Status::Waiting {
                     let work_mode = get_working_mode(&mgr.fox)?;
-                    s.update_import_schedule(&config.files.schedule_dir, instant, work_mode, Status::Started)?;
+                    let soc = get_current_soc(&mgr.fox)?;
+                    
+                    s.update_import_schedule(&config.files.schedule_dir, instant, work_mode, Status::Started, soc)?;
                 }
             } 
         }
@@ -105,4 +108,16 @@ fn set_mode_schedule(fox: &Fox, schedule: &TimeSegmentsDataRequest) -> Result<()
     )?;
 
     Ok(())
+}
+
+/// Returns current State of Charge
+///
+/// # Arguments
+///
+/// * 'fox' - reference to the Fox struct
+fn get_current_soc(fox: &Fox) -> Result<u8, WorkerError> {
+    Ok(retry!(
+        "get_variable_typed::<SoC>",
+        ||fox.get_variable_typed::<SoC>(),
+    )?)
 }

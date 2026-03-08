@@ -97,7 +97,8 @@ impl Schedule {
     /// * 'date_time' - the segment in time to update
     /// * 'work_mode' - the work mode the segment should be in
     /// * 'status' - the status to set the segment to
-    pub fn update_import_schedule(&mut self, schedule_dir: &str, date_time: DateTime<Utc>, work_mode: FoxWorkModes, status: Status) -> Result<(), SchedulingError>{
+    /// * 'soc' - the soc to set the segment to
+    pub fn update_import_schedule(&mut self, schedule_dir: &str, date_time: DateTime<Utc>, work_mode: FoxWorkModes, status: Status, soc: u8) -> Result<(), SchedulingError>{
         let block_type = work_mode_to_block_type(&work_mode);
 
         let block = self.import_schedule.blocks.iter_mut().filter(|b| {
@@ -106,6 +107,7 @@ impl Schedule {
 
         if let Some(b) = block && b.block_type == block_type && b.status != status {
             b.status = status;
+            b.true_soc_in = Some(soc as usize);
             save_import_schedule(schedule_dir, &self.import_schedule)?;
         }
 
