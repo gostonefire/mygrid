@@ -41,7 +41,7 @@ fn main() {
         let (config, mut mgr) = match init() {
             Ok((c, m)) => (c, m),
             Err(e) => {
-                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, None);
+                (n_errors, last_error) = manage_error(format!("{:#}", e), n_errors, last_error, None);
                 continue;
             }
         };
@@ -49,8 +49,8 @@ fn main() {
         match working_mode_switch(&config, &mut mgr) {
             Ok(()) => return,
             Err(e) => {
-                error!("{}", e);
-                (n_errors, last_error) = manage_error(e.to_string(), n_errors, last_error, Some(&mgr.mail));
+                error!("{:#}", e);
+                (n_errors, last_error) = manage_error(format!("{:#}", e), n_errors, last_error, Some(&mgr.mail));
             }
         }
     }
