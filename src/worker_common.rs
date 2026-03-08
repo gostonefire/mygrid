@@ -27,15 +27,17 @@ pub enum BlockType {
     Charge,
     Hold,
     Use,
+    Unknown,
 }
 
 /// Implementation of the Display Trait for pretty print
 impl fmt::Display for BlockType {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            BlockType::Charge => write!(f, "Charge"),
-            BlockType::Hold   => write!(f, "Hold  "),
-            BlockType::Use    => write!(f, "Use   "),
+            BlockType::Charge => write!(f, "Charge "),
+            BlockType::Hold   => write!(f, "Hold   "),
+            BlockType::Use    => write!(f, "Use    "),
+            BlockType::Unknown => write!(f, "Unknown"),
         }
     }
 }

@@ -15,14 +15,14 @@ use crate::manual_scheduler::Schedule;
 use crate::manual::check_manual;
 
 pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerError> {
+    info!("running manual scheduler");
+    
     let loaded_schedule = import_schedule(&config.files.schedule_dir, mgr.time.utc_now(), false)?;
+    set_non_mode_scheduler_mode(&mgr.fox)?;
     
     let mut schedule = Schedule::new(&config.files.schedule_dir, config.charge.soc_kwh, loaded_schedule);
-
     let mut charge_check_done: DateTime<Utc> = DateTime::default();
     let mut utc_now: DateTime<Utc> = mgr.time.utc_now();
-
-
     let mut active_block: Option<usize> = schedule.get_block_by_time(utc_now, false);
 
     loop {
@@ -32,9 +32,9 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), Worker
         // Check if we should go into manual mode for today
         if let Some(manual_mode) = check_manual(&config.files.manual_file, utc_now)? {
             if manual_mode {
-                info!("manual mode activated for today");
+                info!("non-automated mode activated for today");
             } else {
-                info!("manual mode deactivated for today");
+                info!("non-automated mode deactivated for today");
             }
         }
 
@@ -104,6 +104,8 @@ pub fn run_manual_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), Worker
                         WorkerError::SetUse(e.to_string())
                     })?;
                 },
+                
+                BlockType::Unknown => status = Status::Error,
             }
             block.update_block_status(status.clone(), Some(soc));
             log_schedule(&schedule);
@@ -136,18 +138,18 @@ fn set_charge(fox: &Fox, soc: u8, block: &Block, utc_now: DateTime<Utc>) -> Resu
     if soc >= block.soc_out as u8 {
         let _ = retry!(
             "disable_charge_schedule",
-            ||fox.disable_charge_schedule()
+            ||fox.disable_charge_schedule(),
         )?;
         let _ = retry!(
             "set_setting_typed::<MinSocOnGrid>",
-            ||fox.set_setting_typed::<MinSocOnGrid>(block.soc_out as u8)
+            ||fox.set_setting_typed::<MinSocOnGrid>(block.soc_out as u8),
         )?;
 
         Ok(Status::Full(FullAt {soc: soc as usize, time: utc_now}))
     } else {
         let _ = retry!(
             "set_battery_charging_time_schedule",
-            ||fox.set_battery_charging_time_schedule(true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE)))
+            ||fox.set_battery_charging_time_schedule(true, block.start_time, block.end_time.add(Duration::minutes(BLOCK_UNIT_SIZE))),
         )?;
 
         Ok(Status::Started)
@@ -175,11 +177,11 @@ fn set_full_if_done(fox: &Fox, soc: u8, max_soc: usize, utc_now: DateTime<Utc>) 
 
         let _ = retry!(
             "disable_charge_schedule",
-            ||fox.disable_charge_schedule()
+            ||fox.disable_charge_schedule(),
         )?;
         let _ = retry!(
             "set_setting_typed::<MinSocOnGrid>",
-            ||fox.set_setting_typed::<MinSocOnGrid>(min_soc as u8)
+            ||fox.set_setting_typed::<MinSocOnGrid>(min_soc as u8),
         )?;
 
         Ok(Some(Status::Full(FullAt {soc: soc as usize, time: utc_now})))
@@ -219,11 +221,11 @@ fn set_hold(fox: &Fox, soc: u8, max_min_soc: u8) -> Result<Status, WorkerError> 
 
     let _ = retry!(
         "disable_charge_schedule",
-        ||fox.disable_charge_schedule()
+        ||fox.disable_charge_schedule(),
     )?;
     let _ = retry!(
         "set_setting_typed::<MinSocOnGrid>",
-        ||fox.set_setting_typed::<MinSocOnGrid>(min_soc)
+        ||fox.set_setting_typed::<MinSocOnGrid>(min_soc),
     )?;
 
     Ok(Status::Started)
@@ -245,14 +247,29 @@ fn set_use(fox: &Fox) -> Result<Status, WorkerError> {
 
     let _ = retry!(
         "disable_charge_schedule",
-        ||fox.disable_charge_schedule()
+        ||fox.disable_charge_schedule(),
     )?;
     let _ = retry!(
         "set_setting_typed::<MinSocOnGrid>",
-        ||fox.set_setting_typed::<MinSocOnGrid>(10)
+        ||fox.set_setting_typed::<MinSocOnGrid>(10),
     )?;
 
     Ok(Status::Started)
+}
+
+/// Sets the inverter to non-mode scheduler mode
+/// 
+/// # Arguments
+/// 
+/// * 'fox' - reference to the Fox struct
+fn set_non_mode_scheduler_mode(fox: &Fox) -> Result<(), WorkerError> {
+    info!("setting non-mode scheduler mode");
+    if is_manual_debug()? {return Ok(())}
+
+    Ok(retry!(
+        "fox.set_main_switch_status",
+        ||fox.set_main_switch_status(false),
+    )?)
 }
 
 /// Returns current State of Charge
@@ -263,7 +280,7 @@ fn set_use(fox: &Fox) -> Result<Status, WorkerError> {
 fn get_current_soc(fox: &Fox) -> Result<u8, WorkerError> {
     Ok(retry!(
         "get_variable_typed::<SoC>",
-        ||fox.get_variable_typed::<SoC>()
+        ||fox.get_variable_typed::<SoC>(),
     )?)
 }
 

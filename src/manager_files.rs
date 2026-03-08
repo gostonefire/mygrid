@@ -1,9 +1,10 @@
 use std::fs;
+use std::ops::Add;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, NaiveDateTime, Utc};
 use log::warn;
 use thiserror::Error;
-use crate::worker_common::{Block, ImportSchedule};
+use crate::worker_common::{Block, ImportSchedule, BLOCK_UNIT_SIZE};
 
 /// Gets schedule (if any) for a given date time
 ///
@@ -37,13 +38,14 @@ pub fn get_schedule_for_date(schedule_dir: &str, date_time: DateTime<Utc>) -> Re
 /// * 'date_time' - datetime object used to check if the loaded schedule blocks are valid for the given day
 pub fn load_scheduled_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Result<Option<ImportSchedule>, FileManagerError> {
     let file_path = format!("{}schedule.json", schedule_dir);
-    let day = date_time.ordinal0();
 
     if Path::new(&file_path).exists() {
         let json = fs::read_to_string(file_path)?;
         let import_schedule: ImportSchedule = serde_json::from_str(&json)?;
 
-        if import_schedule.blocks.iter().any(|b| b.start_time.ordinal0() == day) {
+        if import_schedule.blocks.iter().any(|b| {
+            date_time >= b.start_time && date_time < b.end_time.add(chrono::Duration::minutes(BLOCK_UNIT_SIZE))
+        }) {
             Ok(Some(import_schedule))
         } else {
             Ok(None)
@@ -62,14 +64,24 @@ pub fn load_scheduled_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Re
 /// * 'mode_scheduler' - whether to use mode scheduler
 /// * 'schedule_id' - id of the schedule, shall refer to the original schedule from the mygrid scheduler
 pub fn save_scheduled_blocks(schedule_dir: &str, blocks: &Vec<Block>, soc_kwh: f64, mode_scheduler: bool, schedule_id: i64) -> Result<(), FileManagerError> {
-    let file_path = format!("{}schedule.json", schedule_dir);
-
     let import_schedule = ImportSchedule {
         mode_scheduler,
         soc_kwh,
         blocks: blocks.clone(),
         schedule_id,
     };
+
+    Ok(save_import_schedule(schedule_dir, &import_schedule)?)
+}
+
+/// Saves schedule to file
+///
+/// # Arguments
+///
+/// * 'schedule_dir' - the directory to save the file to
+/// * 'import_schedule' - the schedule to save
+pub fn save_import_schedule(schedule_dir: &str, import_schedule: &ImportSchedule) -> Result<(), FileManagerError> {
+    let file_path = format!("{}schedule.json", schedule_dir);
 
     let json = serde_json::to_string_pretty(&import_schedule)?;
 
