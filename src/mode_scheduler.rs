@@ -45,7 +45,7 @@ impl Schedule {
                             fd_pwr: None,
                             min_soc_on_grid: None,
                             fd_soc: Some(b.soc_out as f64),
-                            max_soc: None,
+                            max_soc: Some(b.soc_out as f64),
                             import_limit: None,
                             export_limit: None,
                             pv_limit: None,

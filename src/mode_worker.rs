@@ -41,6 +41,7 @@ pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerEr
                 if status == Status::Waiting {
                     let work_mode = get_working_mode(&mgr.fox)?;
                     let soc = get_current_soc(&mgr.fox)?;
+                    info!("inverter is in work mode {} and soc is {}", work_mode.as_str(), soc);
                     
                     s.update_import_schedule(&config.files.schedule_dir, instant, work_mode, Status::Started, soc)?;
                 }
