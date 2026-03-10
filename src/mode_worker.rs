@@ -37,12 +37,16 @@ pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerEr
         if mgr.time.utc_now() - instant > Duration::seconds(60) && let Some(s) = schedule.as_mut() {
             instant = mgr.time.utc_now();
 
-            if let Some(status) = s.get_current_schedule_status(&mgr.mail, instant) {
+            if let Some((status, assumed_work_mode)) = s.get_current_schedule_status(&mgr.mail, instant) {
                 if status == Status::Waiting {
-                    let work_mode = get_working_mode(&mgr.fox)?;
+                    let mut work_mode = get_working_mode(&mgr.fox)?;
                     let soc = get_current_soc(&mgr.fox)?;
-                    info!("inverter is in work mode {} and soc is {}", work_mode.as_str(), soc);
-                    
+                    info!("inverter is reporting work mode {} and soc is {}", work_mode.as_str(), soc);
+
+                    if assumed_work_mode == FoxWorkModes::ForceCharge {
+                        info!("assumed work mode is ForceCharge, but Fox ESS Cloud seem to report that as SelfUse so schedule will be updated as started anyway");
+                        work_mode = FoxWorkModes::ForceCharge;
+                    }
                     s.update_import_schedule(&config.files.schedule_dir, instant, work_mode, Status::Started, soc)?;
                 }
             } 

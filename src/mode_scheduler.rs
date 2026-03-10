@@ -114,19 +114,19 @@ impl Schedule {
         Ok(())
     }
     
-    /// Gets the current schedule status in the import_schedule for a given date and time
+    /// Gets the current schedule status and work mode in the import_schedule for a given date and time
     /// 
     /// # Arguments
     ///
     /// * 'mail' - Mail instance to send error messages
     /// * 'date_time' - Date and time to check schedule status
-    pub fn get_current_schedule_status(&self, mail: &Mail, date_time: DateTime<Utc>) -> Option<Status> {
+    pub fn get_current_schedule_status(&self, mail: &Mail, date_time: DateTime<Utc>) -> Option<(Status, FoxWorkModes)> {
         let block = self.import_schedule.blocks.iter().filter(|b| {
             date_time >= b.start_time && date_time < b.end_time.add(TimeDelta::minutes(BLOCK_UNIT_SIZE))
         }).last();
         
         if let Some(b) = block {
-            Some(b.status.clone())
+            Some((b.status.clone(), block_type_to_work_mode(&b.block_type)))
         } else {
             error!("no block found for time {} when checking import schedule status", date_time);
             let _ = mail.send_mail("Mode Scheduler Error".to_string(), format!("No block found for time {} when checking import schedule status", date_time));
