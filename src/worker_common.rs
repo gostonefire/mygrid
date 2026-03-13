@@ -138,8 +138,10 @@ pub fn is_manual_debug() -> anyhow::Result<bool, WorkerError> {
 }
 
 pub fn import_schedule(schedule_dir: &str, date_time: DateTime<Utc>, as_mode_scheduler: bool) -> Result<Option<ImportSchedule>, WorkerError> {
-    let loaded_schedule = load_scheduled_blocks(schedule_dir, date_time)?
-        .or(get_schedule_for_date(schedule_dir, date_time)?);
+    let loaded_schedule = match load_scheduled_blocks(schedule_dir, date_time)? {
+        Some(schedule) => Some(schedule),
+        None => get_schedule_for_date(schedule_dir, date_time)?,
+    };
 
     if as_mode_scheduler && (loaded_schedule.is_none() || loaded_schedule.as_ref().is_some_and(|s| !s.mode_scheduler)) {
         return Err(WorkerError::IsManualSchedule);
