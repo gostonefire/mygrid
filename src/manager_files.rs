@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use log::warn;
 use thiserror::Error;
-use crate::worker_common::{Block, ImportSchedule, BLOCK_UNIT_SIZE};
+use crate::worker_common::{ImportSchedule, BLOCK_UNIT_SIZE};
 
 /// Gets schedule (if any) for a given date time
 ///
@@ -53,25 +53,6 @@ pub fn load_scheduled_blocks(schedule_dir: &str, date_time: DateTime<Utc>) -> Re
     } else {
         Ok(None)
     }
-}
-
-/// Saves scheduled blocks to file
-///
-/// # Arguments
-///
-/// * 'schedule_dir' - the directory to save the file to
-/// * 'blocks' - schedule blocks to save
-/// * 'mode_scheduler' - whether to use mode scheduler
-/// * 'schedule_id' - id of the schedule, shall refer to the original schedule from the mygrid scheduler
-pub fn save_scheduled_blocks(schedule_dir: &str, blocks: &Vec<Block>, soc_kwh: f64, mode_scheduler: bool, schedule_id: i64) -> Result<(), FileManagerError> {
-    let import_schedule = ImportSchedule {
-        mode_scheduler,
-        soc_kwh,
-        blocks: blocks.clone(),
-        schedule_id,
-    };
-
-    Ok(save_import_schedule(schedule_dir, &import_schedule)?)
 }
 
 /// Saves schedule to file

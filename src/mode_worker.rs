@@ -1,16 +1,17 @@
 use std::thread;
 use std::time::Duration as StdDuration;
 use foxess::{Fox, FoxWorkModes, TimeSegmentsDataRequest};
-use log::{error, info};
+use log::{error, info, warn};
 use anyhow::Result;
 use chrono::Duration;
 use foxess::fox_settings::WorkMode;
 use foxess::fox_variables::SoC;
 use crate::retry;
 use crate::config::Config;
-use crate::worker_common::{import_schedule, is_manual_debug, WorkerError, Status};
+use crate::worker_common::{import_schedule_from_file, is_manual_debug, WorkerError, Status};
 use crate::initialization::Mgr;
 use crate::manager_mail::Mail;
+use crate::manual::check_manual;
 use crate::mode_scheduler::Schedule;
 
 pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerError> {
@@ -18,12 +19,38 @@ pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerEr
 
     let mut instant = mgr.time.utc_now();
     let mut schedule: Option<Schedule> = None;
+    let mut no_schedule_found_warned = false;
 
     loop {
         thread::sleep(StdDuration::from_secs(10));
+        let utc_now = mgr.time.utc_now();
 
-        let import_schedule = import_schedule(&config.files.schedule_dir, mgr.time.utc_now(), true)?
-            .ok_or(WorkerError::Other("got None from import_schedule in mode_worker, should not be possible"))?;
+        // Check if we should go into manual mode for today
+        if let Some(manual_mode) = check_manual(&config.files.manual_file, utc_now)? {
+            if manual_mode {
+                info!("non-automated mode activated for today");
+            } else {
+                info!("non-automated mode deactivated for today");
+            }
+        }
+
+        let import_schedule = match import_schedule_from_file(&config.files.schedule_dir, utc_now)? {
+            Some(s) => {
+                no_schedule_found_warned = false;
+                s
+            },
+            None => {
+                if !no_schedule_found_warned {
+                    let _ = mgr.mail.send_mail(
+                        "Mode Scheduler Error".to_string(),
+                        "No schedule found for today, using default schedule".to_string()
+                    );
+                    warn!("no schedule found for today, using default schedule");
+                    no_schedule_found_warned = true;
+                }
+                Schedule::new_default_import_schedule()
+            }
+        };
 
         if schedule.is_none() || import_schedule.schedule_id != schedule.as_ref().unwrap().import_schedule.schedule_id {
             schedule = Some(Schedule::new(import_schedule));
@@ -34,8 +61,8 @@ pub fn run_mode_scheduler(config: &Config, mgr: &mut Mgr) -> Result<(), WorkerEr
             check_switch_status(&mgr.fox, &mgr.mail)?;
         }
 
-        if mgr.time.utc_now() - instant > Duration::seconds(60) && let Some(s) = schedule.as_mut() {
-            instant = mgr.time.utc_now();
+        if utc_now - instant > Duration::seconds(60) && let Some(s) = schedule.as_mut() {
+            instant = utc_now;
 
             if let Some((status, assumed_work_mode)) = s.get_current_schedule_status(&mgr.mail, instant) {
                 if status == Status::Waiting {

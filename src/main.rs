@@ -3,22 +3,16 @@ use std::thread;
 use std::time::Duration;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 use log::error;
-use anyhow::{Context, Result};
-use crate::worker_common::WorkerError;
-use crate::config::Config;
-use crate::initialization::{init, Mgr};
+use crate::initialization::init;
 use crate::manager_mail::Mail;
-use crate::manual_worker::run_manual_scheduler;
 use crate::mode_worker::run_mode_scheduler;
 
 mod macros;
 mod initialization;
-mod manual_worker;
 mod manager_mail;
 mod manual;
 mod config;
 mod logging;
-mod manual_scheduler;
 mod mode_scheduler;
 mod manager_files;
 mod mode_worker;
@@ -46,7 +40,7 @@ fn main() {
             }
         };
 
-        match working_mode_switch(&config, &mut mgr) {
+        match run_mode_scheduler(&config, &mut mgr) {
             Ok(()) => return,
             Err(e) => {
                 error!("{:#}", e);
@@ -56,40 +50,6 @@ fn main() {
     }
 }
 
-
-/// The work mode switch tries the manual mode first. Each worker determines for themselves whether
-/// the chedule they import is for itself or for the other and returns a friendly accordingly. 
-///
-/// # Arguments
-///
-/// * 'config' - The configuration for the workers
-/// * 'mgr' - The manager for the workers
-fn working_mode_switch(config: &Config, mut mgr: &mut Mgr) -> Result<()> {
-    let mut is_manual_scheduler = true;
-
-    loop {
-        let result = if is_manual_scheduler {
-            run_manual_scheduler(config, &mut mgr)
-        } else {
-            run_mode_scheduler(config, &mut mgr)
-        };
-
-        match result {
-            Ok(_) => return Ok(()),
-            Err(WorkerError::IsModeSchedule) => is_manual_scheduler = false,
-            Err(WorkerError::IsManualSchedule) => is_manual_scheduler = true,
-            Err(e) => {
-                let context = if is_manual_scheduler {
-                    "working_mode_switch: manual scheduler failed"
-                } else {
-                    "working_mode_switch: mode scheduler failed"
-                };
-
-                return Err(e).context(context);
-            }
-        }
-    }
-}
 
 /// Manage top level errors
 ///

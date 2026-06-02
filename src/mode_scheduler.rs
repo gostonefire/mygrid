@@ -1,9 +1,9 @@
 use std::ops::Add;
-use chrono::{DateTime, Local, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, DurationRound, Local, TimeDelta, Timelike, Utc};
 use foxess::{ExtraParam, FoxWorkModes, Group, TimeSegmentsDataRequest};
 use log::{error, warn};
 use crate::manager_files::save_import_schedule;
-use crate::worker_common::{BlockType, ImportSchedule, Status, BLOCK_UNIT_SIZE};
+use crate::worker_common::{Block, BlockType, ImportSchedule, Status, BLOCK_UNIT_SIZE};
 use crate::manager_mail::Mail;
 use crate::scheduler_common::SchedulingError;
 
@@ -21,6 +21,27 @@ impl Schedule {
         Self {
             import_schedule,
         }
+    }
+
+    /// Creates a new instance of an ImportSchedule
+    ///
+    pub fn new_default_import_schedule() -> ImportSchedule {
+        let (start_time, end_time) = get_utc_day_start(Utc::now(), 0);
+
+            ImportSchedule {
+                blocks: vec![Block {
+                    block_id: 0,
+                    block_type: BlockType::Use,
+                    start_time,
+                    end_time: end_time.add(-TimeDelta::minutes(BLOCK_UNIT_SIZE)),
+                    cost: 0.0,
+                    true_soc_in: None,
+                    soc_in: 10,
+                    soc_out: 10,
+                    status: Status::Waiting,
+                }],
+                schedule_id: 0,
+            }
     }
 
     /// Creates a time segments data request struct and validates it
@@ -58,7 +79,7 @@ impl Schedule {
             }).collect::<Vec<_>>();
 
         if let Some(first_block) = groups.first() {
-            if first_block.start_hour != 0 && first_block.start_minute != 0 {
+            if !(first_block.start_hour == 0 && first_block.start_minute == 0) {
                 groups.insert(0, Group {
                     start_hour: 0,
                     start_minute: 0,
@@ -163,6 +184,28 @@ fn validate_schedule(ts_groups: &Vec<Group>) -> Result<(), SchedulingError> {
     }
     
     Ok(())
+}
+
+/// Returns the start and end (non-inclusive) of a day in UTC time.
+/// For DST switch days (summer to winter time and vice versa), the length of the day
+/// will be either 23 hours (in the spring) or 25 hours (in the autumn).
+///
+/// # Arguments
+///
+/// * 'date_time' - date time to get utc day start and end for (in relation to Local timezone)
+/// * 'day_index' - 0-based index of the day, 0 is today, -1 is yesterday, etc.
+fn get_utc_day_start(date_time: DateTime<Utc>, day_index: i64) -> (DateTime<Utc>, DateTime<Utc>) {
+    // First, go local and move hour to a safe place regarding DST day shift between summer and winter time.
+    // Also, apply the day index to get to the desired day.
+    let date = date_time.with_timezone(&Local).with_hour(12).unwrap().add(TimeDelta::days(day_index));
+
+    // Then trunc to a whole hour and move time to the start of day local (Chrono manages offset change if necessary)
+    let start = date.duration_trunc(TimeDelta::hours(1)).unwrap().with_hour(0).unwrap();
+
+    // Then add one day and do the same as for start
+    let end = date.add(TimeDelta::days(1)).duration_trunc(TimeDelta::hours(1)).unwrap().with_hour(0).unwrap();
+
+    (start.with_timezone(&Utc), end.with_timezone(&Utc))
 }
 
 /// Translates between mygrid_scheduler work modes to FoxESS mode scheduler work modes

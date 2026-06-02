@@ -6,11 +6,6 @@ use chrono::{DateTime, Local};
 use thiserror::Error;
 
 #[derive(Deserialize)]
-pub struct Charge {
-    pub soc_kwh: f64,
-}
-
-#[derive(Deserialize)]
 pub struct FoxESS {
     #[serde(default)]
     pub api_key: String,
@@ -46,7 +41,6 @@ pub struct General {
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub charge: Charge,
     pub fox_ess: FoxESS,
     pub mail: MailParameters,
     pub files: Files,
